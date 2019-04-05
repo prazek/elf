@@ -70,11 +70,11 @@ std::tuple<elf_symbol_table, elf_symbol_strings> read_symbol_table(
 
   for (int i = 0; i < symbol_count; i++) {
     symbol_table_strings.push_back(&string_table[symbol_table[i].st_name]);
-
+/*
     printf("0x%08x ", symbol_table[i].st_value);
     printf("0x%02x ", ELF32_ST_BIND(symbol_table[i].st_info));
     printf("0x%02x ", ELF32_ST_TYPE(symbol_table[i].st_info));
-    printf("%s\n", (&string_table[symbol_table[i].st_name]));
+    printf("%s\n", (&string_table[symbol_table[i].st_name]));*/
   }
 
   return {std::move(symbol_table), std::move(symbol_table_strings)};

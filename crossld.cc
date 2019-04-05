@@ -14,6 +14,7 @@
 #include <iostream>
 #include <vector>
 #include <unordered_map>
+#include <cassert>
 
 using namespace elf_utils;
 
@@ -42,16 +43,15 @@ bool get_header(std::fstream &file, Elf32_Ehdr &header) {
   return true;
 }
 
-
 struct Unmapper {
   uint32_t prog_size;
 
   void operator()(char *ptr) const { munmap(ptr, prog_size); }
 };
 
-using mapped_exec = std::unique_ptr<char[], Unmapper>;
+using mapped_mem = std::unique_ptr<char[], Unmapper>;
 
-mapped_exec load_program_segment(const Elf32_Phdr &program_header,
+mapped_mem load_program_segment(const Elf32_Phdr &program_header,
                                  std::fstream &elf_file) {
 
   int flags = ((program_header.p_flags & PF_W) ? PROT_WRITE : 0) |
@@ -76,7 +76,7 @@ mapped_exec load_program_segment(const Elf32_Phdr &program_header,
                                    -1,
                                    0); // TODO check MAP_PRIVATE
 
-  mapped_exec exec(mmaped_ptr, Unmapper{actual_size});
+  mapped_mem exec(mmaped_ptr, Unmapper{actual_size});
 
   if (exec.get() == MAP_FAILED) {
     perror("Mapping failed");
@@ -109,26 +109,109 @@ mapped_exec load_program_segment(const Elf32_Phdr &program_header,
   return exec;
 }
 
-void *create_trampoline(const function &func) {
-  return nullptr;
+
+
+int set_register(int arg_num, type arg_type, char *code) {
+  if (arg_type == type::TYPE_LONG_LONG || arg_type == type::TYPE_UNSIGNED_LONG_LONG) {
+    switch(arg_num) {
+      case 0:
+        *code = 0x5f; // pop rdi
+        return 1;
+      case 1:
+        *code = 0x5e; // pop rsi
+        return 1;
+    default:
+      printf("TODO: Not supported\n");
+    }
+  } else {
+    printf("TODO: also not supported yet\n");
+  }
+  return 0;
 }
 
-std::unordered_map<std::string,
-                   void *> create_trampolines(const function *funcs,
-                                              const int nfuncs) {
+void set_registers(const function &func, char*& code) {
+  for (int arg_num = 0; arg_num < func.nargs; arg_num++) {
+    int diff = set_register(arg_num, func.args[arg_num], code);
+    code += diff;
+  }
+
+}
+
+// This code switches to 64 bit mode and continue executing next 64bits instructions.
+const unsigned char TRAMPOLINE_SWITCH_TO_64_BITS[] = {
+    0x6a, 0x33,               // 0: push   $0x33
+    0x68, 00, 00, 00, 00,     // 2: push   $0x0
+    0xcb                      // 7: lret
+};
+
+const unsigned char CALL_FN[] = {
+    0xe8, 0, 0, 0, 0   // call <PUT_ADDR_HERE>
+};
+
+
+void *create_trampoline(const function &func, char *&code, char *code_end) {
+  char *begin_of_function = code;
+  assert(code_end - code > 100); // TODO
+
+  memcpy(code, TRAMPOLINE_SWITCH_TO_64_BITS, sizeof(TRAMPOLINE_SWITCH_TO_64_BITS));
+  code += sizeof(TRAMPOLINE_SWITCH_TO_64_BITS);
+
+  set_registers(func, code);
+
+  memcpy(code, CALL_FN, sizeof(CALL_FN));
+  int32_t function_offset = (char*)func.code - code;
+  // Put address of real function
+  memcpy(code + 1, &function_offset, 4);
+  code += sizeof(CALL_FN);
+
+
+
+
+  return begin_of_function;
+}
+
+void *create_exit_trampoline() {
+  return nullptr; // TODO
+}
+
+std::unordered_map<std::string, void *> create_trampolines(const function *funcs,
+                                                           const int nfuncs,
+                                                           std::vector<mapped_mem> &alloced_trampolines) {
+
+  static const int TRAMPOLINES_BUFFER = 4 * 1024;
+  auto alloc_trampolines_code = []() {
+
+    char *memory = (char *) mmap(NULL, TRAMPOLINES_BUFFER, PROT_EXEC | PROT_READ | PROT_WRITE,
+                                 MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (memory == MAP_FAILED) {
+      perror("Can't allocate memory for trampolines");
+      return mapped_mem{};
+    }
+    return mapped_mem(memory, Unmapper{TRAMPOLINES_BUFFER});
+  };
+  
+  alloced_trampolines.push_back(alloc_trampolines_code());
+  char* trampolines_begin = alloced_trampolines.back().get();
+  char* trampolines_end = trampolines_begin + TRAMPOLINES_BUFFER;
+  
+
   std::unordered_map<std::string, void *> trampolines;
   for (int i = 0; i < nfuncs; i++) {
-    trampolines[funcs[i].name] = create_trampoline(funcs[i]);
+    trampolines[funcs[i].name] = create_trampoline(funcs[i], trampolines_begin, trampolines_end);
   }
+  
+  if (trampolines.count("exit"))
+    trampolines["exit"] = create_exit_trampoline();
+
   return trampolines;
 }
 
-std::vector<mapped_exec> alloc_exec(const Elf32_Ehdr &header,
+std::vector<mapped_mem> alloc_exec(const Elf32_Ehdr &header,
                                     std::fstream &elf_file) {
 
   const std::vector<Elf32_Phdr>
       program_headers = read_program_headers(header, elf_file);
-  std::vector<mapped_exec> mapped_sections;
+  std::vector<mapped_mem> mapped_sections;
   mapped_sections.reserve(program_headers.size());
 
   for (const Elf32_Phdr &pheader : program_headers) {
@@ -163,8 +246,6 @@ void set_rellocations(
     auto trampoline_code = trampolines.find(rel_name);
     if (trampoline_code == trampolines.end())
       continue;
-    std::cout << ((void **) relocation.r_offset) << " " << rel_name
-              << std::endl;
 
     *((void **) (ptrdiff_t) relocation.r_offset) = trampoline_code->second;
   }
@@ -187,7 +268,9 @@ extern "C" int crossld_start(const char *fname,
   if (!get_header(elf_file, header))
     return -1;
 
-  auto trampolines = create_trampolines(funcs, nfuncs);
+  std::vector<mapped_mem> alloced_trampolines;
+
+  auto trampolines = create_trampolines(funcs, nfuncs, alloced_trampolines);
   auto mapped_segments = alloc_exec(header, elf_file);
 
   std::cout << header.e_ident << "\n";
@@ -216,6 +299,7 @@ extern "C" int crossld_start(const char *fname,
 
   set_rellocations(symbol_table_strings, relocation_table, trampolines);
 
+
   static const int STACK_SIZE = 1024 * 1024 * 4; // 4MB of stack.
   void *stack = mmap(NULL,
                      STACK_SIZE,
@@ -227,6 +311,20 @@ extern "C" int crossld_start(const char *fname,
     perror("Can't allocate stack\n");
     return -1;
   }
+
+  const void* reversed_stack =  (void*) (((uint64_t) stack) + STACK_SIZE - 4);
+
+  char* entry_point = (char*)(ptrdiff_t)header.e_entry;
+
+
+  /* Switch to 32-bit mode and jump into the 32-bit code */
+  __asm__ volatile("movq %0, %%rsp;\n"
+                   "subq $8, %%rsp\n"
+                   "movl $0x23, 4(%%rsp);\n"
+                   "movq %1, %%rax;\n"
+                   "movl %%eax, (%%rsp);\n"
+                   "lret" ::  "r"(reversed_stack), "r"(entry_point) );
+
 
   return 0;
 }
