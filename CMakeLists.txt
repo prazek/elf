@@ -10,7 +10,7 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O2 -fomit-frame-pointer -ffast-math-optimizations 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-strict-aliasing")
 
 
-set(SOURCE_FILES crossld.h crossld.cc)
+set(SOURCE_FILES crossld.h crossld.cc elf_utils.h elf_utils.cc)
 
 
 add_library(crossld SHARED

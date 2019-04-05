@@ -1,4 +1,6 @@
 #include "crossld.h"
+#include "elf_utils.h"
+
 #include <elf.h>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -12,6 +14,8 @@
 #include <iostream>
 #include <vector>
 #include <unordered_map>
+
+using namespace elf_utils;
 
 namespace {
 bool check_elf(const Elf32_Ehdr &header) {
@@ -38,113 +42,6 @@ bool get_header(std::fstream &file, Elf32_Ehdr &header) {
   return true;
 }
 
-std::vector<Elf32_Shdr> read_section_headers(const Elf32_Ehdr &header,
-                                             std::fstream &file) {
-  std::vector<Elf32_Shdr> sections(header.e_shnum);
-  if (!file.seekg(header.e_shoff)) {
-    perror("Couldn't read sections");
-    return {};
-  }
-
-  for (int i = 0; i < header.e_shnum; i++) {
-    if (!file.read(reinterpret_cast<char *>(&sections[i]),
-                   header.e_shentsize)) {
-      perror("Couldn't read section header");
-      return {};
-    }
-  }
-
-  return sections;
-}
-
-using elf_bytes = std::unique_ptr<const char[]>;
-
-elf_bytes read_section(const Elf32_Shdr &section_header, std::fstream &file) {
-  if (section_header.sh_size == 0)
-    return {};
-
-  std::unique_ptr<char[]> section(new char[section_header.sh_size]);
-  if (!file.seekg(section_header.sh_offset)) {
-    perror("Couldn't find section");
-    return {};
-  }
-
-  if (!file.read(section.get(), section_header.sh_size)) {
-    perror("Couldn't read section");
-    return {};
-  }
-  return section;
-}
-
-using elf_symbol_table = std::vector<Elf32_Sym>;
-using elf_symbol_strings = std::vector<std::string>;
-
-std::tuple<elf_symbol_table, elf_symbol_strings> read_symbol_table(
-    const Elf32_Shdr &section_header,
-    const Elf32_Shdr &string_header,
-    std::fstream &file) {
-
-  const auto symbol_count = section_header.sh_size / sizeof(Elf32_Sym);
-
-  std::vector<Elf32_Sym> symbol_table = [&] {
-    elf_bytes symbol_table_bytes = read_section(section_header,
-                                                file);
-    // In C++20 we would bless the memory so that we would not have to call
-    // memcopy, but since we do not use strict-aliasing, it is fine.
-    const auto
-        *begin = reinterpret_cast<const Elf32_Sym *>(symbol_table_bytes.get());
-    const auto *end = begin + symbol_count;
-    return elf_symbol_table(begin, end);
-  }();
-
-  elf_bytes string_table = read_section(string_header, file);
-
-  std::vector<std::string> symbol_table_strings;
-  symbol_table_strings.reserve(symbol_count);
-
-  for (int i = 0; i < symbol_count; i++) {
-    symbol_table_strings.push_back(&string_table[symbol_table[i].st_name]);
-
-    printf("0x%08x ", symbol_table[i].st_value);
-    printf("0x%02x ", ELF32_ST_BIND(symbol_table[i].st_info));
-    printf("0x%02x ", ELF32_ST_TYPE(symbol_table[i].st_info));
-    printf("%s\n", (&string_table[symbol_table[i].st_name]));
-  }
-
-  return {std::move(symbol_table), std::move(symbol_table_strings)};
-}
-
-using elf_rel_table = std::vector<Elf32_Rel>;
-
-elf_rel_table read_rel_table(const Elf32_Shdr &section_header,
-                             std::fstream &file) {
-  const auto symbol_count = section_header.sh_size / sizeof(Elf32_Rel);
-  elf_bytes rel_table_bytes = read_section(section_header, file);
-  const auto
-      *begin = reinterpret_cast<const Elf32_Rel *>(rel_table_bytes.get());
-  const auto *end = begin + symbol_count;
-
-  return elf_rel_table(begin, end);
-}
-
-std::vector<Elf32_Phdr> read_program_headers(const Elf32_Ehdr &header,
-                                             std::fstream &elf_file) {
-  std::vector<Elf32_Phdr> program_headers(header.e_phnum);
-  if (!elf_file.seekg(header.e_phoff)) {
-    perror("Couldn't read sections");
-    return {};
-  }
-
-  for (int i = 0; i < header.e_phnum; i++) {
-    if (!elf_file.read(reinterpret_cast<char *>(&program_headers[i]),
-                       header.e_phentsize)) {
-      perror("Couldn't read section header");
-      return {};
-    }
-  }
-
-  return program_headers;
-}
 
 struct Unmapper {
   uint32_t prog_size;
@@ -163,11 +60,14 @@ mapped_exec load_program_segment(const Elf32_Phdr &program_header,
   int flags_before_writing = flags | PROT_WRITE;
 
   char *mapped_to = (char *) (ptrdiff_t) program_header.p_vaddr;
-  char *mapped_to_nearest_page = (char*)((ptrdiff_t )mapped_to & ~(getpagesize() - 1));
+  char *mapped_to_nearest_page =
+      (char *) ((ptrdiff_t) mapped_to & ~(getpagesize() - 1));
   uint32_t diff = mapped_to - mapped_to_nearest_page;
   uint32_t actual_size = program_header.p_memsz + diff;
 
-  printf("mapping region [0x%lx, 0x%lx]\n", (uint64_t)mapped_to_nearest_page, (uint64_t)mapped_to + actual_size);
+  printf("mapping region [0x%lx, 0x%lx]\n",
+         (uint64_t) mapped_to_nearest_page,
+         (uint64_t) mapped_to + actual_size);
 
   char *mmaped_ptr = (char *) mmap(mapped_to_nearest_page,
                                    actual_size,
@@ -250,8 +150,24 @@ std::vector<mapped_exec> alloc_exec(const Elf32_Ehdr &header,
   return mapped_sections;
 }
 
-void set_rellocations(const Elf32_Ehdr &header,
-                      const std::vector<Elf32_Phdr> &program_headers) {
+void set_rellocations(
+    const elf_symbol_strings &symbol_table_strings,
+    const elf_rel_table &relocation_table,
+    const std::unordered_map<std::string, void *> &trampolines) {
+
+  std::cout << "relocations\n";
+  for (const Elf32_Rel &relocation : relocation_table) {
+
+    const std::string
+        &rel_name = symbol_table_strings[ELF32_R_SYM(relocation.r_info)];
+    auto trampoline_code = trampolines.find(rel_name);
+    if (trampoline_code == trampolines.end())
+      continue;
+    std::cout << ((void **) relocation.r_offset) << " " << rel_name
+              << std::endl;
+
+    *((void **) (ptrdiff_t) relocation.r_offset) = trampoline_code->second;
+  }
 
 }
 
@@ -260,39 +176,33 @@ void set_rellocations(const Elf32_Ehdr &header,
 extern "C" int crossld_start(const char *fname,
                              const function *funcs,
                              int nfuncs) {
-  std::fstream file(fname, std::ios_base::in | std::ios::binary);
+  std::fstream elf_file(fname, std::ios_base::in | std::ios::binary);
 
-  if (!file) {
+  if (!elf_file) {
     fprintf(stderr, "Couldn't open file [%s]\n", fname);
     return false;
   }
 
   Elf32_Ehdr header;
-  if (!get_header(file, header))
+  if (!get_header(elf_file, header))
     return -1;
 
   auto trampolines = create_trampolines(funcs, nfuncs);
-  auto mapped_segments = alloc_exec(header, file);
+  auto mapped_segments = alloc_exec(header, elf_file);
 
   std::cout << header.e_ident << "\n";
-  auto section_headers = read_section_headers(header, file);
+  auto section_headers = read_section_headers(header, elf_file);
 
   elf_symbol_table symbol_table;
   elf_symbol_strings symbol_table_strings;
-
   elf_rel_table relocation_table;
 
   for (const Elf32_Shdr &section_header : section_headers) {
     std::cout << "Section: " << section_header.sh_size << std::endl;
 
     if (section_header.sh_type == SHT_DYNSYM) {
-
       std::tie(symbol_table, symbol_table_strings) = read_symbol_table(
-          section_header, section_headers.at(section_header.sh_link), file);
-
-      if (symbol_table.empty()) {
-        perror("wtf");
-      }
+          section_header, section_headers.at(section_header.sh_link), elf_file);
 
       for (const auto &str: symbol_table_strings) {
         std::cout << str << std::endl;
@@ -300,20 +210,11 @@ extern "C" int crossld_start(const char *fname,
 
     } else if (section_header.sh_type == SHT_REL) {// TODO RELA?
       std::cout << "found REL";
-      relocation_table = read_rel_table(section_header, file);
+      relocation_table = read_rel_table(section_header, elf_file);
     }
   }
 
-  std::cout << "relocations\n";
-  for (const Elf32_Rel &relocation : relocation_table) {
-    const std::string
-        &rel_name = symbol_table_strings[ELF32_R_SYM(relocation.r_info)];
-    std::cout << ((void **) relocation.r_offset) << " " << rel_name
-              << std::endl;
-
-    *((void**)(ptrdiff_t)relocation.r_offset) = trampolines[rel_name];
-
-  }
+  set_rellocations(symbol_table_strings, relocation_table, trampolines);
 
   static const int STACK_SIZE = 1024 * 1024 * 4; // 4MB of stack.
   void *stack = mmap(NULL,
