@@ -20,5 +20,6 @@ int main(int argc, char *argv[]) {
   };
 
 
-  crossld_start(argv[1], funcs, 1);
+  int result = crossld_start(argv[1], funcs, 1);
+  printf("Returned with result %d\n", result);
 }

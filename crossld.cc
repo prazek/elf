@@ -16,6 +16,7 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <csetjmp>
 
 using namespace elf_utils;
 
@@ -154,21 +155,21 @@ int set_register(unsigned arg_num, type arg_type, char *code) {
   case type::TYPE_INT:
   case type::TYPE_UNSIGNED_INT:
     if (arg_num < 4) {
-      memcpy(code, MOVE_STACK_4_BYTES, sizeof(MOVE_STACK_4_BYTES));
-      memcpy(code + sizeof(MOVE_STACK_4_BYTES), CONV_32_BIT_OPCODES_SHORT[arg_num], 3);
+      memcpy(code, CONV_32_BIT_OPCODES_SHORT[arg_num], 3);
+      memcpy(code + 3 , MOVE_STACK_4_BYTES, sizeof(MOVE_STACK_4_BYTES));
       return 3 + sizeof(MOVE_STACK_4_BYTES);
     }
     if (arg_num < 6) {
-      memcpy(code, MOVE_STACK_4_BYTES, sizeof(MOVE_STACK_4_BYTES));
-      memcpy(code + sizeof(MOVE_STACK_4_BYTES), CONV_32_BIT_OPCODES_LONGER[arg_num - 4], 4);
+      memcpy(code, CONV_32_BIT_OPCODES_LONGER[arg_num - 4], 4);
+      memcpy(code + 4, MOVE_STACK_4_BYTES, sizeof(MOVE_STACK_4_BYTES));
       return 4 + sizeof(MOVE_STACK_4_BYTES);
     }
     printf("TODO: not supported\n");
     return 0;
   case type::TYPE_LONG:
     if (arg_num < 6) {
-      memcpy(code, MOVE_STACK_4_BYTES, sizeof(MOVE_STACK_4_BYTES));
-      memcpy(code + sizeof(MOVE_STACK_4_BYTES), CONV_SIGNED_32_BIT_TO_SIGNED_64[arg_num], 4);
+      memcpy(code, CONV_SIGNED_32_BIT_TO_SIGNED_64[arg_num], 4);
+      memcpy(code + 4, MOVE_STACK_4_BYTES, sizeof(MOVE_STACK_4_BYTES));
       return 4 + sizeof(MOVE_STACK_4_BYTES);
     }
     printf("TODO not supported\n");
@@ -195,6 +196,11 @@ const unsigned char TRAMPOLINE_SWITCH_TO_64_BITS[] = {
     0xcb                      // 7: lret
 };
 
+const unsigned char SAVE_RETURN_PTR[] = {
+    0x44, 0x8b, 0x2c, 0x24,   //  mov    (%rsp),%r13d
+    0x48, 0x83, 0xc4, 0x04    //  add    $0x4,%rsp
+};
+
 // Before call, we need to fix aslignment of stack.
 const unsigned char FIX_ALIGNMENT_OF_STACK[] = {
     0x49, 0x89, 0xe4,         // mov    %rsp,%r12
@@ -208,6 +214,11 @@ const unsigned char CALL_FN[] = {
 
 const unsigned char REMOVE_ALIGNMENT_OF_STACK[] = {
     0x4c, 0x89, 0xe4   // mov    %r12,%rsp
+};
+
+const unsigned char FIX_RETURN_PTR[] = {
+    0x48, 0x83, 0xec, 0x04,   //  sub    $0x4,%rsp
+    0x44, 0x89, 0x2c, 0x24    //  mov    %r13d,(%rsp)
 };
 
 const int RETURN_TO_32_BITS_ADDR_INDX = 15;
@@ -238,6 +249,9 @@ void *create_trampoline(const function &func, char *&code, char *code_end) {
   memcpy(code + 3, &addr_aftertrampoline, 4);
   code += sizeof(TRAMPOLINE_SWITCH_TO_64_BITS);
 
+  memcpy(code, SAVE_RETURN_PTR, sizeof(SAVE_RETURN_PTR));
+  code += sizeof(SAVE_RETURN_PTR);
+
   set_registers(func, code);
 
   memcpy(code, FIX_ALIGNMENT_OF_STACK, sizeof(FIX_ALIGNMENT_OF_STACK));
@@ -251,6 +265,9 @@ void *create_trampoline(const function &func, char *&code, char *code_end) {
 
   memcpy(code, REMOVE_ALIGNMENT_OF_STACK, sizeof(REMOVE_ALIGNMENT_OF_STACK));
   code += sizeof(REMOVE_ALIGNMENT_OF_STACK);
+
+  memcpy(code, FIX_RETURN_PTR, sizeof(FIX_RETURN_PTR));
+  code += sizeof(FIX_RETURN_PTR);
 
   memcpy(code, RETURN_TO_32_BITS, sizeof(RETURN_TO_32_BITS));
   char *addr_after_returning_to_32_bit = code + sizeof(RETURN_TO_32_BITS);
@@ -266,9 +283,15 @@ void *create_trampoline(const function &func, char *&code, char *code_end) {
   return begin_of_function;
 }
 
-void *create_exit_trampoline() {
-  return nullptr; // TODO
+static int exit_code = 0;
+jmp_buf exit_buff;
+__attribute__((noreturn)) void exit_64bit(int code) {
+  printf("Trying to exit\n");
+  exit_code = code;
+  longjmp(exit_buff, 1);
 }
+
+
 
 std::unordered_map<std::string, void *> create_trampolines(const function *funcs,
                                                            const int nfuncs,
@@ -295,8 +318,11 @@ std::unordered_map<std::string, void *> create_trampolines(const function *funcs
     trampolines[funcs[i].name] = create_trampoline(funcs[i], trampolines_begin, trampolines_end);
   }
 
-  if (trampolines.count("exit"))
-    trampolines["exit"] = create_exit_trampoline();
+  enum type exit_types[] = {TYPE_INT};
+  struct function exit_func =
+      {"print", exit_types, 1, TYPE_VOID, (void*)exit_64bit};
+
+  trampolines["exit"] = create_trampoline(exit_func, trampolines_begin, trampolines_end);
 
   return trampolines;
 }
@@ -407,16 +433,23 @@ extern "C" int crossld_start(const char *fname,
   char *entry_point = (char *) (ptrdiff_t) header.e_entry;
   std::cout << "Trying to switch context\n";
 
-  /* Switch to 32-bit mode and jump into the 32-bit code */
-  __asm__ volatile("movq %0, %%rsp  \n"
-                   "subq $8, %%rsp \n"
-                   "movl $0x23, 4(%%rsp) \n"
-                   "movq %1, %%rax \n"
-                   "movl %%eax, (%%rsp) \n"
-                   "movw %w2, %%ds \n"
-                   "movw %w2, %%es \n"
-                   "lret"::"irm"(reversed_stack), "r"(entry_point), "r"(0x2b)
-  : "rax", "memory", "flags");
+  if (setjmp(exit_buff) == 0) {
+    /* Switch to 32-bit mode and jump into the 32-bit code */
+    __asm__ volatile("movq %0, %%rsp  \n"
+                     "subq $8, %%rsp \n"
+                     "movl $0x23, 4(%%rsp) \n"
+                     "movq %1, %%rax \n"
+                     "movl %%eax, (%%rsp) \n"
+                     "movw %w2, %%ds \n"
+                     "movw %w2, %%es \n"
+                     "lret"::"irm"(reversed_stack), "r"(entry_point), "r"(0x2b)
+    : "rax", "memory", "flags");
+
+
+
+  } else {
+    return exit_code;
+  }
 
 
   return 0;

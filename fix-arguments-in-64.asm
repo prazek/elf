@@ -1,6 +1,10 @@
 print:
 
 __code64:
+; save return pointer
+mov r13d, [rsp]
+add rsp, 4
+
 
 ; Fix registers
 ; void print(char *str);
@@ -49,6 +53,9 @@ call print
 ; Fix back alignment
 mov rsp, r12
 
+; restore return pointer
+sub rsp, 4
+mov [rsp], r13d
 
 ; result in eax/rax
 ; try to convert to 32 bits
@@ -65,6 +72,8 @@ __check_unsigned_long_long:
         cmp     rax, rcx
         ja      exit
 ok:
+
+
 
 ; switch to 32 bits
 sub rsp, 8
