@@ -2,6 +2,11 @@
         global _start       ;Declaration for linker (ld)
 
 _start:
+		push 0x2b
+		pop ds
+		push 0x2b
+		pop es
+        jmp .call_print
 
 
 .call_print:
@@ -17,5 +22,5 @@ push 0x2b
 pop ds
 push 0x2b
 pop es
-
+ret
 

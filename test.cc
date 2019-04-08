@@ -5,7 +5,8 @@
 #include "crossld.h"
 
 static void print(char *c) {
-  printf("From 64bit code: [%s]", c);
+  printf("Also maybe this will work?\n");
+  fprintf(stderr, "From 64bit code: [%s]\n", c);
 }
 
 int main(int argc, char *argv[]) {

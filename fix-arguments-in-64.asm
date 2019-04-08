@@ -1,6 +1,7 @@
 print:
 
 __code64:
+
 ; Fix registers
 ; void print(char *str);
 ; got parameters on stack (top is first arg)
@@ -10,13 +11,47 @@ pop rdx
 pop rcx
 pop r9
 pop r8
+
+; or 32 bit ptr or unsigned long passed, or 32 bit
+mov edi, [rsp]
+add rsp, 4
+mov esi, [rsp]
+add rsp, 4
+mov edx, [rsp]
+add rsp, 4
+mov ecx, [rsp]
+add rsp, 4
+mov r9d, [rsp]
+add rsp, 4
+mov r8d, [rsp]
+; or 32 bit signed long passed
+movsx rdi, DWORD [rsp]
+add rsp, 4
+movsx rsi, DWORD  [rsp]
+add rsp, 4
+movsx rdx, DWORD [rsp]
+add rsp, 4
+movsx rcx, DWORD [rsp]
+add rsp, 4
+movsx r9, DWORD [rsp]
+add rsp, 4
+movsx r8, DWORD [rsp]
+
+
+
 ; next args are already on the stack?
 
-; fix alignment?
+; Fix alignment
+mov r12, rsp
+and rsp, -16
+
 call print
+; Fix back alignment
+mov rsp, r12
+
+
 ; result in eax/rax
 ; try to convert to 32 bits
-
 
 __check_signed_long_long:
         mov     edx, 2147483648
@@ -32,7 +67,9 @@ __check_unsigned_long_long:
 ok:
 
 ; switch to 32 bits
-push 0x23
+sub rsp, 8
+mov dword [rsp+4], 0x23
+mov dword [rsp], exit
 retf
 
 exit:
