@@ -1,14 +1,16 @@
 print:
 
 __code64:
+; save 32 bit registers
+mov r14d, edi
+mov r15d, esi
 ; save return pointer
 mov r13d, [rsp]
 add rsp, 4
+; TODO save edi and esi register
 
-
-; Fix registers
-; void print(char *str);
-; got parameters on stack (top is first arg)
+; Fix registers:
+; If paramteers are 64 bit, just pop them
 pop rdi
 pop rsi
 pop rdx
@@ -16,7 +18,7 @@ pop rcx
 pop r9
 pop r8
 
-; or 32 bit ptr or unsigned long passed, or 32 bit
+; For pointer (which is 32 bit) or unsigned long or 32 bit value
 mov edi, [rsp]
 add rsp, 4
 mov esi, [rsp]
@@ -73,7 +75,9 @@ __check_unsigned_long_long:
         ja      exit
 ok:
 
-
+; Fix edi and esi
+mov edi, r14d
+mov esi, r15d
 
 ; switch to 32 bits
 sub rsp, 8

@@ -196,6 +196,14 @@ const unsigned char TRAMPOLINE_SWITCH_TO_64_BITS[] = {
     0xcb                      // 7: lret
 };
 
+// In 32 bit calling convention edi and esi registers do not change when calling function,
+// which means we need to save them, as 64 bit code does not have this requirement.
+const unsigned char SAVE_EDI_AND_ESI[] = {
+    0x41, 0x89, 0xfe,  //   mov    %edi,%r14d
+    0x41, 0x89, 0xf7   //   mov    %esi,%r15d
+
+};
+
 const unsigned char SAVE_RETURN_PTR[] = {
     0x44, 0x8b, 0x2c, 0x24,   //  mov    (%rsp),%r13d
     0x48, 0x83, 0xc4, 0x04    //  add    $0x4,%rsp
@@ -214,6 +222,11 @@ const unsigned char CALL_FN[] = {
 
 const unsigned char REMOVE_ALIGNMENT_OF_STACK[] = {
     0x4c, 0x89, 0xe4   // mov    %r12,%rsp
+};
+
+const unsigned char RESTORE_EDI_AND_ESI[] = {
+    0x44, 0x89, 0xf7,   // mov    %r14d,%edi
+    0x44, 0x89, 0xfe    // mov    %r15d,%esi
 };
 
 const unsigned char FIX_RETURN_PTR[] = {
@@ -249,6 +262,9 @@ void *create_trampoline(const function &func, char *&code, char *code_end) {
   memcpy(code + 3, &addr_aftertrampoline, 4);
   code += sizeof(TRAMPOLINE_SWITCH_TO_64_BITS);
 
+  memcpy(code, SAVE_EDI_AND_ESI, sizeof(SAVE_EDI_AND_ESI));
+  code += sizeof(SAVE_EDI_AND_ESI);
+
   memcpy(code, SAVE_RETURN_PTR, sizeof(SAVE_RETURN_PTR));
   code += sizeof(SAVE_RETURN_PTR);
 
@@ -265,6 +281,9 @@ void *create_trampoline(const function &func, char *&code, char *code_end) {
 
   memcpy(code, REMOVE_ALIGNMENT_OF_STACK, sizeof(REMOVE_ALIGNMENT_OF_STACK));
   code += sizeof(REMOVE_ALIGNMENT_OF_STACK);
+
+  memcpy(code, RESTORE_EDI_AND_ESI, sizeof(RESTORE_EDI_AND_ESI));
+  code += sizeof(RESTORE_EDI_AND_ESI);
 
   memcpy(code, FIX_RETURN_PTR, sizeof(FIX_RETURN_PTR));
   code += sizeof(FIX_RETURN_PTR);
@@ -290,8 +309,6 @@ __attribute__((noreturn)) void exit_64bit(int code) {
   exit_code = code;
   longjmp(exit_buff, 1);
 }
-
-
 
 std::unordered_map<std::string, void *> create_trampolines(const function *funcs,
                                                            const int nfuncs,
@@ -444,14 +461,9 @@ extern "C" int crossld_start(const char *fname,
                      "movw %w2, %%es \n"
                      "lret"::"irm"(reversed_stack), "r"(entry_point), "r"(0x2b)
     : "rax", "memory", "flags");
-
-
-
-  } else {
-    return exit_code;
+    assert(false && "This asm does not return, we get back only through longjmp");
   }
 
-
-  return 0;
+  return exit_code;
 }
 
