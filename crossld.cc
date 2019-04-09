@@ -498,7 +498,6 @@ extern "C" int crossld_start(const char *fname, const function *funcs,
   elf_rel_table relocation_table;
 
   for (const Elf32_Shdr &section_header : section_headers) {
-
     if (section_header.sh_type == SHT_DYNSYM) {
       std::tie(symbol_table, symbol_table_strings) = read_symbol_table(
           section_header, section_headers.at(section_header.sh_link), elf_file);

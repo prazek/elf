@@ -24,13 +24,7 @@ add rsp, 8
 mov r8, [rsp]
 add rsp, 8
 
-sub rsp, 4
-sub rsp, 8
-sub rsp, 12
-sub rsp, 16
-sub rsp, 20
-sub rsp, 24
-sub rsp, 48
+
 
 ; For pointer (which is 32 bit) or unsigned long or 32 bit value
 mov edi, [rsp]
@@ -59,6 +53,15 @@ movsx r9, DWORD [rsp]
 add rsp, 4
 movsx r8, DWORD [rsp]
 add rsp, 4
+
+
+; then fix the stack back
+sub rsp, 4
+sub rsp, 8
+sub rsp, 12
+sub rsp, 16
+sub rsp, 20
+sub rsp, 24
 
 
 
