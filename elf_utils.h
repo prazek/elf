@@ -2,8 +2,8 @@
 
 #include <elf.h>
 #include <fstream>
-#include <vector>
 #include <memory>
+#include <vector>
 
 namespace elf_utils {
 
@@ -17,10 +17,9 @@ elf_bytes read_section(const Elf32_Shdr &section_header, std::fstream &file);
 using elf_symbol_table = std::vector<Elf32_Sym>;
 using elf_symbol_strings = std::vector<std::string>;
 
-std::tuple<elf_symbol_table, elf_symbol_strings> read_symbol_table(
-    const Elf32_Shdr &section_header,
-    const Elf32_Shdr &string_header,
-    std::fstream &file);
+std::tuple<elf_symbol_table, elf_symbol_strings>
+read_symbol_table(const Elf32_Shdr &section_header,
+                  const Elf32_Shdr &string_header, std::fstream &file);
 
 using elf_rel_table = std::vector<Elf32_Rel>;
 

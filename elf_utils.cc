@@ -43,20 +43,18 @@ elf_bytes read_section(const Elf32_Shdr &section_header, std::fstream &file) {
 using elf_symbol_table = std::vector<Elf32_Sym>;
 using elf_symbol_strings = std::vector<std::string>;
 
-std::tuple<elf_symbol_table, elf_symbol_strings> read_symbol_table(
-    const Elf32_Shdr &section_header,
-    const Elf32_Shdr &string_header,
-    std::fstream &file) {
+std::tuple<elf_symbol_table, elf_symbol_strings>
+read_symbol_table(const Elf32_Shdr &section_header,
+                  const Elf32_Shdr &string_header, std::fstream &file) {
 
   const auto symbol_count = section_header.sh_size / sizeof(Elf32_Sym);
 
   std::vector<Elf32_Sym> symbol_table = [&] {
-    elf_bytes symbol_table_bytes = read_section(section_header,
-                                                file);
+    elf_bytes symbol_table_bytes = read_section(section_header, file);
     // In C++20 we would bless the memory so that we would not have to call
     // memcopy, but since we do not use strict-aliasing, it is fine.
-    const auto
-        *begin = reinterpret_cast<const Elf32_Sym *>(symbol_table_bytes.get());
+    const auto *begin =
+        reinterpret_cast<const Elf32_Sym *>(symbol_table_bytes.get());
     const auto *end = begin + symbol_count;
     return elf_symbol_table(begin, end);
   }();
@@ -79,8 +77,8 @@ elf_rel_table read_rel_table(const Elf32_Shdr &section_header,
                              std::fstream &file) {
   const auto symbol_count = section_header.sh_size / sizeof(Elf32_Rel);
   elf_bytes rel_table_bytes = read_section(section_header, file);
-  const auto
-      *begin = reinterpret_cast<const Elf32_Rel *>(rel_table_bytes.get());
+  const auto *begin =
+      reinterpret_cast<const Elf32_Rel *>(rel_table_bytes.get());
   const auto *end = begin + symbol_count;
 
   return elf_rel_table(begin, end);
