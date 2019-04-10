@@ -8,7 +8,6 @@ std::vector<Elf32_Shdr> read_section_headers(const Elf32_Ehdr &header,
   if (!file.seekg(header.e_shoff))
     throw std::runtime_error("Empty elf header");
 
-
   for (int i = 0; i < header.e_shnum; i++) {
     if (!file.read(reinterpret_cast<char *>(&sections[i]),
                    header.e_shentsize))
@@ -83,7 +82,7 @@ std::vector<Elf32_Phdr> read_program_headers(const Elf32_Ehdr &header,
   std::vector<Elf32_Phdr> program_headers(header.e_phnum);
   if (!elf_file.seekg(header.e_phoff))
     throw std::runtime_error("Couldn't read sections");
-  
+
   for (int i = 0; i < header.e_phnum; i++) {
     if (!elf_file.read(reinterpret_cast<char *>(&program_headers[i]),
                        header.e_phentsize))

@@ -23,7 +23,6 @@ using namespace elf_utils;
 
 namespace {
 
-
 bool check_elf(const Elf32_Ehdr &header) {
   if (memcmp(header.e_ident, ELFMAG, SELFMAG) != 0)
     return false;
@@ -60,20 +59,20 @@ mapped_mem load_program_segment(const Elf32_Phdr &program_header,
                                 std::fstream &elf_file) {
 
   int flags = ((program_header.p_flags & PF_W) ? PROT_WRITE : 0) |
-              ((program_header.p_flags & PF_X) ? PROT_EXEC : 0) |
-              ((program_header.p_flags & PF_R) ? PROT_READ : 0);
+      ((program_header.p_flags & PF_X) ? PROT_EXEC : 0) |
+      ((program_header.p_flags & PF_R) ? PROT_READ : 0);
   int flags_before_writing = flags | PROT_WRITE;
 
-  char *mapped_to = (char *)(ptrdiff_t)program_header.p_vaddr;
+  char *mapped_to = (char *) (ptrdiff_t) program_header.p_vaddr;
   char *mapped_to_nearest_page =
-      (char *)((ptrdiff_t)mapped_to & ~(getpagesize() - 1));
+      (char *) ((ptrdiff_t) mapped_to & ~(getpagesize() - 1));
   uint32_t diff = mapped_to - mapped_to_nearest_page;
   uint32_t actual_size = program_header.p_memsz + diff;
 
   char *mmaped_ptr =
-      (char *)mmap(mapped_to_nearest_page, actual_size, flags_before_writing,
-                   MAP_ANONYMOUS | MAP_PRIVATE, -1,
-                   0); // TODO check MAP_PRIVATE
+      (char *) mmap(mapped_to_nearest_page, actual_size, flags_before_writing,
+                    MAP_ANONYMOUS | MAP_PRIVATE, -1,
+                    0); // TODO check MAP_PRIVATE
 
   mapped_mem exec(mmaped_ptr, Unmapper{actual_size});
 
@@ -83,14 +82,11 @@ mapped_mem load_program_segment(const Elf32_Phdr &program_header,
   if (exec.get() != mapped_to_nearest_page)
     throw std::runtime_error("Required segment to map is already mapped!");
 
-
   if (!elf_file.seekg(program_header.p_offset))
     throw std::runtime_error("crossld_start: Can't find segment");
 
-
   if (!elf_file.read(exec.get(), program_header.p_filesz))
     throw std::runtime_error("crossld_start: Couldn't read segment");
-
 
   if (flags_before_writing != flags) {
     if (mprotect(mapped_to, program_header.p_memsz, flags) != 0) {
@@ -141,7 +137,7 @@ unsigned char CONV_SIGNED_32_BIT_TO_SIGNED_64[NUM_REGISTERS][4] = {
 int grow_stack(int bytes_num, char *code) {
   assert(bytes_num < 256);
   memcpy(code, GROW_STACK_UP_TO_256_BYTES, sizeof(GROW_STACK_UP_TO_256_BYTES));
-  unsigned char bytes_num_c = (char)bytes_num;
+  unsigned char bytes_num_c = (char) bytes_num;
   code[3] = bytes_num_c;
   return sizeof(GROW_STACK_UP_TO_256_BYTES);
 }
@@ -149,23 +145,23 @@ int shrink_stack(int bytes_num, char *code) {
   assert(bytes_num < 256);
   memcpy(code, SHRINK_STACK_UP_TO_256_BYTES,
          sizeof(SHRINK_STACK_UP_TO_256_BYTES));
-  unsigned char bytes_num_c = (char)bytes_num;
+  unsigned char bytes_num_c = (char) bytes_num;
   code[3] = bytes_num_c;
   return sizeof(SHRINK_STACK_UP_TO_256_BYTES);
 }
 
 int set_register(unsigned arg_num, type arg_type, int &stack_shrank,
                  char *code) {
+  assert (arg_num < NUM_REGISTERS);
+
   switch (arg_type) {
   case type::TYPE_LONG_LONG:
   case type::TYPE_UNSIGNED_LONG_LONG:
-    if (arg_num < NUM_REGISTERS) {
-      memcpy(code, CONV_64_TO_64_OPCODES[arg_num], 4);
-      stack_shrank += 8;
-      return 4 + shrink_stack(8, code + 4);
-    }
-    printf("TODO: not supported\n");
-    return 0;
+
+    memcpy(code, CONV_64_TO_64_OPCODES[arg_num], 4);
+    stack_shrank += 8;
+    return 4 + shrink_stack(8, code + 4);
+
   case type::TYPE_PTR:
   case type::TYPE_UNSIGNED_LONG:
   case type::TYPE_INT:
@@ -175,36 +171,52 @@ int set_register(unsigned arg_num, type arg_type, int &stack_shrank,
       stack_shrank += 4;
       return 3 + shrink_stack(4, code + 3);
     }
-    if (arg_num < 6) {
-      memcpy(code, CONV_32_BIT_OPCODES_LONGER[arg_num - 4], 4);
-      stack_shrank += 4;
-      return 4 + shrink_stack(4, code + 4);
-    }
-    printf("TODO: not supported\n");
-    return 0;
+    memcpy(code, CONV_32_BIT_OPCODES_LONGER[arg_num - 4], 4);
+    stack_shrank += 4;
+    return 4 + shrink_stack(4, code + 4);
+
   case type::TYPE_LONG:
-    if (arg_num < NUM_REGISTERS) {
-      memcpy(code, CONV_SIGNED_32_BIT_TO_SIGNED_64[arg_num], 4);
-      stack_shrank += 4;
-      return 4 + shrink_stack(4, code + 4);
-    }
-    printf("TODO not supported\n");
+    memcpy(code, CONV_SIGNED_32_BIT_TO_SIGNED_64[arg_num], 4);
+    stack_shrank += 4;
+    return 4 + shrink_stack(4, code + 4);
+
+  case type::TYPE_VOID:
+    throw std::runtime_error("Arg can't be void");
+  }
+}
+
+int put_arg_on_stack(type arg_type, char *code) {
+  switch (arg_type) {
+  case type::TYPE_LONG:
+  case type::TYPE_UNSIGNED_LONG:
+  case type::TYPE_LONG_LONG:
+  case type::TYPE_UNSIGNED_LONG_LONG:
+  case type::TYPE_PTR:
+    printf("64 bits");
+    return 0;
+
+  case type::TYPE_INT:
+  case type::TYPE_UNSIGNED_INT:
+    printf("32 bits");
     return 0;
   case type::TYPE_VOID:
     throw std::runtime_error("Arg can't be void");
   }
-
-  return 0;
 }
-
 void set_registers(const function &func, char *&code) {
   int stack_shrank = 0;
-  for (int arg_num = 0; arg_num < func.nargs; arg_num++) {
+  // Firstly put arguments to registers
+  for (int arg_num = 0; arg_num < std::min(func.nargs, NUM_REGISTERS); arg_num++) {
     int diff = set_register(arg_num, func.args[arg_num], stack_shrank, code);
     code += diff;
   }
-
   code += grow_stack(stack_shrank, code);
+
+  // Rest of the arguments need to be put on the stack.
+  for (int arg_num = NUM_REGISTERS; arg_num < func.nargs; arg_num++) {
+      code += put_arg_on_stack(func.args[arg_num], code);
+  }
+  // TODO clean up stack after call.
 }
 
 static int exit_code = 0;
@@ -218,7 +230,7 @@ __attribute__((noreturn)) void exit_64bit(int code) {
 // instructions.
 const unsigned char TRAMPOLINE_SWITCH_TO_64_BITS[] = {
     0x6a, 0x33,             // 0: push   $0x33
-    0x68, 00,   00, 00, 00, // 2: push   $0x0
+    0x68, 00, 00, 00, 00, // 2: push   $0x0
     0xcb                    // 7: lret
 };
 
@@ -290,7 +302,7 @@ const int RETURN_TO_32_BITS_ADDR_INDX = 15;
 const unsigned char RETURN_TO_32_BITS[] = {
     0x48, 0x83, 0xec, 0x08,                         // sub    $0x8,%rsp
     0xc7, 0x44, 0x24, 0x04, 0x23, 0x00, 0x00, 0x00, // movl   $0x23,0x4(%rsp)
-    0xc7, 0x04, 0x24, 00,   00,   00,   00,         // movl   <PUT_ADDR_HERE>,(%rsp)
+    0xc7, 0x04, 0x24, 00, 00, 00, 00,         // movl   <PUT_ADDR_HERE>,(%rsp)
     0xcb                                            // lret
 };
 
@@ -313,7 +325,7 @@ void set_returned_value(type return_type, char *&code) {
            sizeof(CHECK_RETURNED_SIGNED_LONG));
     code += sizeof(CHECK_RETURNED_SIGNED_LONG);
     memcpy(code, CALL_FN, sizeof(CALL_FN));
-    void *exit_addr = (void*)exit_64bit;
+    void *exit_addr = (void *) exit_64bit;
     memcpy(code + FN_64_ADDR_OFFSET, &exit_addr, 8);
     code += sizeof(CALL_FN);
     return;
@@ -325,7 +337,7 @@ void set_returned_value(type return_type, char *&code) {
            sizeof(CHECK_RETURNED_UNSIGNED_LONG_OR_PTR));
     code += sizeof(CHECK_RETURNED_UNSIGNED_LONG_OR_PTR);
     memcpy(code, CALL_FN, sizeof(CALL_FN));
-    void *exit_addr = (void*)exit_64bit;
+    void *exit_addr = (void *) exit_64bit;
     memcpy(code + FN_64_ADDR_OFFSET, &exit_addr, 8);
     code += sizeof(CALL_FN);
     return;
@@ -397,9 +409,9 @@ create_trampolines(const function *funcs, const int nfuncs,
 
   static const int TRAMPOLINES_BUFFER = 4 * 1024;
   auto alloc_trampolines_code = []() {
-    char *memory = (char *)mmap(NULL, TRAMPOLINES_BUFFER,
-                                PROT_EXEC | PROT_READ | PROT_WRITE,
-                                MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+    char *memory = (char *) mmap(NULL, TRAMPOLINES_BUFFER,
+                                 PROT_EXEC | PROT_READ | PROT_WRITE,
+                                 MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
     if (memory == MAP_FAILED)
       throw std::system_error(errno, std::system_category(), "Can't allocate memory for trampolines");
 
@@ -419,7 +431,7 @@ create_trampolines(const function *funcs, const int nfuncs,
   // Additionaly, we add trampoline for the exit function.
   enum type exit_types[] = {TYPE_INT};
   struct function exit_func = {"exit", exit_types, 1, TYPE_VOID,
-                               (void *)exit_64bit};
+                               (void *) exit_64bit};
   trampolines["exit"] =
       create_trampoline(exit_func, trampolines_begin, trampolines_end);
 
@@ -438,7 +450,7 @@ std::vector<mapped_mem> alloc_exec(const Elf32_Ehdr &header,
     if (pheader.p_type != PT_LOAD)
       continue;
     if (pheader.p_filesz > pheader.p_memsz)
-        throw std::runtime_error("Can't load segment into memory. Segment file size > memory size");
+      throw std::runtime_error("Can't load segment into memory. Segment file size > memory size");
     if (pheader.p_filesz == 0)
       continue;
 
@@ -459,7 +471,7 @@ void set_rellocations(
     if (trampoline_code == trampolines.end())
       throw std::runtime_error(std::string("Function [") + rel_name + "] not provided");
 
-    char *address_to_substitute = (char *)(ptrdiff_t)relocation.r_offset;
+    char *address_to_substitute = (char *) (ptrdiff_t) relocation.r_offset;
     memcpy(address_to_substitute, &trampoline_code->second, 4);
   }
 }
@@ -506,23 +518,22 @@ extern "C" int crossld_start(const char *fname, const function *funcs,
   if (stack == MAP_FAILED)
     throw std::system_error(errno, std::system_category(), "Can't allocate stack");
 
-  const void *reversed_stack = (void *)(((uint64_t)stack) + STACK_SIZE - 4);
-  char *entry_point = (char *)(ptrdiff_t)header.e_entry;
+  const void *reversed_stack = (void *) (((uint64_t) stack) + STACK_SIZE - 4);
+  char *entry_point = (char *) (ptrdiff_t) header.e_entry;
 
   if (setjmp(exit_buff) == 0) {
     /* Switch to 32-bit mode and jump into the 32-bit code */
     __asm__ volatile("movq %0, %%rsp  \n"
                      "subq $8, %%rsp \n"
                      "movl $0x23, 4(%%rsp) \n"
-                     "movq %1, %%rax \n"
-                     "movl %%eax, (%%rsp) \n"
+                     "movl %k1, (%%rsp) \n"
                      "movw %w2, %%ds \n"
                      "movw %w2, %%es \n"
-                     "lret" ::"irm"(reversed_stack),
-                     "r"(entry_point), "r"(0x2b)
-                     : "rax", "memory", "flags");
+                     "lret"::"irm"(reversed_stack),
+    "r"(entry_point), "r"(0x2b)
+    : "rax", "memory", "flags");
     assert(false &&
-           "This asm does not return, we get back only through longjmp");
+        "This asm does not return, we get back only through longjmp");
   }
 
   return exit_code;

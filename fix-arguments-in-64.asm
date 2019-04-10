@@ -63,11 +63,11 @@ sub rsp, 16
 sub rsp, 20
 sub rsp, 24
 
+; Put rest of the arguments:
+add rsp, 24
+mov rax, [rsp]
 
 
-
-
-; next args are already on the stack?
 
 ; Fix alignment
 mov r12, rsp
