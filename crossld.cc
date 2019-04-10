@@ -17,10 +17,13 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <system_error>
 
 using namespace elf_utils;
 
 namespace {
+
+
 bool check_elf(const Elf32_Ehdr &header) {
   if (memcmp(header.e_ident, ELFMAG, SELFMAG) != 0)
     return false;
@@ -74,30 +77,24 @@ mapped_mem load_program_segment(const Elf32_Phdr &program_header,
 
   mapped_mem exec(mmaped_ptr, Unmapper{actual_size});
 
-  if (exec.get() == MAP_FAILED) {
-    perror("crossld_start: Mapping failed");
-    return {};
-  }
-  if (exec.get() != mapped_to_nearest_page) {
-    fprintf(stderr,
-            "crossld_start: Required segment to map is already mapped!\n");
-    return {};
-  }
+  if (exec.get() == MAP_FAILED)
+    throw std::system_error(errno, std::system_category(), "crossld_start: Mapping failed");
 
-  if (!elf_file.seekg(program_header.p_offset)) {
-    fprintf(stderr, "crossld_start: Can't find segment\n");
-    return {};
-  }
+  if (exec.get() != mapped_to_nearest_page)
+    throw std::runtime_error("Required segment to map is already mapped!");
 
-  if (!elf_file.read(exec.get(), program_header.p_filesz)) {
-    fprintf(stderr, "crossld_start: Couldn't read segment\n");
-    return {};
-  }
+
+  if (!elf_file.seekg(program_header.p_offset))
+    throw std::runtime_error("crossld_start: Can't find segment");
+
+
+  if (!elf_file.read(exec.get(), program_header.p_filesz))
+    throw std::runtime_error("crossld_start: Couldn't read segment");
+
 
   if (flags_before_writing != flags) {
     if (mprotect(mapped_to, program_header.p_memsz, flags) != 0) {
-      perror("crossld_start: Failed to protect mapped region\n");
-      return {};
+      throw std::system_error(errno, std::system_category(), "Failed to protect mapped region");
     }
   }
   return exec;
@@ -192,8 +189,9 @@ int set_register(unsigned arg_num, type arg_type, int &stack_shrank,
       return 4 + shrink_stack(4, code + 4);
     }
     printf("TODO not supported\n");
+    return 0;
   case type::TYPE_VOID:
-    printf("Arg can't be void\n");
+    throw std::runtime_error("Arg can't be void");
   }
 
   return 0;
@@ -245,11 +243,12 @@ const unsigned char FIX_ALIGNMENT_OF_STACK[] = {
 
 };
 
+const unsigned int FN_64_ADDR_OFFSET = 2;
 const unsigned char CALL_FN[] = {
-    0xe8, 0, 0, 0, 0 // call <PUT_ADDR_HERE>
+    0x48, 0xb8, 00, 00, 00, 00, 00, 00, 00, 00,    // movabs <PUT_ADDR_HERE>,%rax
+    0xff, 0xd0                                     // callq  *%rax
 };
 
-const unsigned SIGNED_LONG_EXIT_OFFSET = 22;
 const unsigned char CHECK_RETURNED_SIGNED_LONG[] = {
     0xba, 0x00, 0x00, 0x00, 0x80, //  mov    $0x80000000,%edx
     0xb9, 0xff, 0xff, 0xff, 0xff, //  mov    $0xffffffff,%ecx
@@ -257,16 +256,15 @@ const unsigned char CHECK_RETURNED_SIGNED_LONG[] = {
     0x48, 0x39, 0xca,             //  cmp    %rcx,%rdx
     0x76, 0x1a,                   //  jbe    b3 <ok>
     0x83, 0xcf, 0xff,             //  or     $0xffffffff,%edi
-    0xe8, 00,   00,   00,   00    //  callq  c7 <exit_64bit>
+    // Here put call to exit
 };
 
-const unsigned UNSIGNED_LONG_EXIT_ADDR_OFFSET = 14;
 const unsigned char CHECK_RETURNED_UNSIGNED_LONG_OR_PTR[] = {
     0xb9, 0xff, 0xff, 0xff, 0xff, // mov    $0xffffffff,%ecx
     0x48, 0x39, 0xc8,             // cmp    %rcx,%rax
     0x76, 0x08,                   // jbe    b3 <ok>
     0x83, 0xcf, 0xff,             // or     $0xffffffff,%edi
-    0xe8, 00,   00,   00,   00    // callq  c7 <exit_64bit>
+    // HERE put be a call to exit.
 };
 
 const unsigned char MOVE_UPPER_BITS_TO_EDX[] = {
@@ -307,20 +305,17 @@ const unsigned char RETURN_FROM_TRAMPOLINE[] = {
     0xc3, // ret
 };
 
-int32_t get_relative_fn_addr(void *fn_addr, char *place_for_addr) {
-  return (char *)fn_addr - (place_for_addr + 4);
-}
-
 void set_returned_value(type return_type, char *&code) {
   // If returned value is 64 bit signed long, we need to check if it fits
   // 32 bit long.
   if (return_type == TYPE_LONG) {
     memcpy(code, CHECK_RETURNED_SIGNED_LONG,
            sizeof(CHECK_RETURNED_SIGNED_LONG));
-    int32_t exit_relative_addr = get_relative_fn_addr(
-        (void *)exit_64bit, code + SIGNED_LONG_EXIT_OFFSET);
-    memcpy(code + SIGNED_LONG_EXIT_OFFSET, &exit_relative_addr, 4);
     code += sizeof(CHECK_RETURNED_SIGNED_LONG);
+    memcpy(code, CALL_FN, sizeof(CALL_FN));
+    void *exit_addr = (void*)exit_64bit;
+    memcpy(code + FN_64_ADDR_OFFSET, &exit_addr, 8);
+    code += sizeof(CALL_FN);
     return;
   }
   // Similarly, if value is 64 bit ptr or 64 bit unsigned long we need to check
@@ -328,10 +323,11 @@ void set_returned_value(type return_type, char *&code) {
   if (return_type == TYPE_UNSIGNED_LONG || return_type == TYPE_PTR) {
     memcpy(code, CHECK_RETURNED_UNSIGNED_LONG_OR_PTR,
            sizeof(CHECK_RETURNED_UNSIGNED_LONG_OR_PTR));
-    int32_t exit_relative_addr = get_relative_fn_addr(
-        (void *)exit_64bit, code + UNSIGNED_LONG_EXIT_ADDR_OFFSET);
-    memcpy(code + UNSIGNED_LONG_EXIT_ADDR_OFFSET, &exit_relative_addr, 4);
     code += sizeof(CHECK_RETURNED_UNSIGNED_LONG_OR_PTR);
+    memcpy(code, CALL_FN, sizeof(CALL_FN));
+    void *exit_addr = (void*)exit_64bit;
+    memcpy(code + FN_64_ADDR_OFFSET, &exit_addr, 8);
+    code += sizeof(CALL_FN);
     return;
   }
   // move 64 bit return value from rax to edx:eax
@@ -364,9 +360,9 @@ void *create_trampoline(const function &func, char *&code, char *code_end) {
   code += sizeof(FIX_ALIGNMENT_OF_STACK);
 
   memcpy(code, CALL_FN, sizeof(CALL_FN));
-  int32_t function_offset = get_relative_fn_addr(func.code, code + 1);
+
   // Put address of real function
-  memcpy(code + 1, &function_offset, 4);
+  memcpy(code + 2, &func.code, 8);
   code += sizeof(CALL_FN);
 
   set_returned_value(func.result, code);
@@ -404,10 +400,9 @@ create_trampolines(const function *funcs, const int nfuncs,
     char *memory = (char *)mmap(NULL, TRAMPOLINES_BUFFER,
                                 PROT_EXEC | PROT_READ | PROT_WRITE,
                                 MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
-    if (memory == MAP_FAILED) {
-      perror("Can't allocate memory for trampolines");
-      return mapped_mem{};
-    }
+    if (memory == MAP_FAILED)
+      throw std::system_error(errno, std::system_category(), "Can't allocate memory for trampolines");
+
     return mapped_mem(memory, Unmapper{TRAMPOLINES_BUFFER});
   };
 
@@ -442,10 +437,8 @@ std::vector<mapped_mem> alloc_exec(const Elf32_Ehdr &header,
     // Skip
     if (pheader.p_type != PT_LOAD)
       continue;
-    if (pheader.p_filesz > pheader.p_memsz) {
-      fprintf(stderr, "Can't load segment into memory\n");
-      return {};
-    }
+    if (pheader.p_filesz > pheader.p_memsz)
+        throw std::runtime_error("Can't load segment into memory. Segment file size > memory size");
     if (pheader.p_filesz == 0)
       continue;
 
@@ -464,7 +457,7 @@ void set_rellocations(
         symbol_table_strings[ELF32_R_SYM(relocation.r_info)];
     auto trampoline_code = trampolines.find(rel_name);
     if (trampoline_code == trampolines.end())
-      continue;
+      throw std::runtime_error(std::string("Function [") + rel_name + "] not provided");
 
     char *address_to_substitute = (char *)(ptrdiff_t)relocation.r_offset;
     memcpy(address_to_substitute, &trampoline_code->second, 4);
@@ -474,13 +467,11 @@ void set_rellocations(
 } // namespace
 
 extern "C" int crossld_start(const char *fname, const function *funcs,
-                             int nfuncs) {
+                             int nfuncs) try {
   std::fstream elf_file(fname, std::ios_base::in | std::ios::binary);
 
-  if (!elf_file) {
-    fprintf(stderr, "crossld_start: Couldn't open file [%s]\n", fname);
-    return false;
-  }
+  if (!elf_file)
+    throw std::runtime_error(std::string("Couldn't open elf file [") + fname + "]");
 
   Elf32_Ehdr header;
   if (!get_header(elf_file, header))
@@ -512,10 +503,8 @@ extern "C" int crossld_start(const char *fname, const function *funcs,
   static const int STACK_SIZE = 1024 * 1024 * 4; // 4MB of stack.
   void *stack = mmap(NULL, STACK_SIZE, PROT_READ | PROT_WRITE,
                      MAP_ANONYMOUS | MAP_PRIVATE | MAP_32BIT, -1, 0);
-  if (stack == MAP_FAILED) {
-    perror("crossld_start: Can't allocate stack\n");
-    return -1;
-  }
+  if (stack == MAP_FAILED)
+    throw std::system_error(errno, std::system_category(), "Can't allocate stack");
 
   const void *reversed_stack = (void *)(((uint64_t)stack) + STACK_SIZE - 4);
   char *entry_point = (char *)(ptrdiff_t)header.e_entry;
@@ -537,4 +526,10 @@ extern "C" int crossld_start(const char *fname, const function *funcs,
   }
 
   return exit_code;
+} catch (std::system_error &err) {
+  fprintf(stderr, "crossld_start: %s : %s\n", err.what(), std::strerror(err.code().value()));
+  return -1;
+} catch (std::exception &ex) {
+  fprintf(stderr, "crossld_start: %s\n", ex.what());
+  return -1;
 }

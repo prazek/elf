@@ -73,7 +73,8 @@ sub rsp, 24
 mov r12, rsp
 and rsp, -16
 
-call print
+mov rax, print
+call rax
 ; Fix back alignment
 mov rsp, r12
 

@@ -5,17 +5,14 @@ namespace elf_utils {
 std::vector<Elf32_Shdr> read_section_headers(const Elf32_Ehdr &header,
                                              std::fstream &file) {
   std::vector<Elf32_Shdr> sections(header.e_shnum);
-  if (!file.seekg(header.e_shoff)) {
-    perror("Couldn't read sections");
-    return {};
-  }
+  if (!file.seekg(header.e_shoff))
+    throw std::runtime_error("Empty elf header");
+
 
   for (int i = 0; i < header.e_shnum; i++) {
     if (!file.read(reinterpret_cast<char *>(&sections[i]),
-                   header.e_shentsize)) {
-      perror("Couldn't read section header");
-      return {};
-    }
+                   header.e_shentsize))
+      throw std::runtime_error("Couldn't read section header");
   }
 
   return sections;
@@ -25,18 +22,15 @@ using elf_bytes = std::unique_ptr<const char[]>;
 
 elf_bytes read_section(const Elf32_Shdr &section_header, std::fstream &file) {
   if (section_header.sh_size == 0)
-    return {};
+    throw std::runtime_error("Empty elf header");
 
   std::unique_ptr<char[]> section(new char[section_header.sh_size]);
-  if (!file.seekg(section_header.sh_offset)) {
-    perror("Couldn't find section");
-    return {};
-  }
+  if (!file.seekg(section_header.sh_offset))
+    throw std::runtime_error("Could not find elf section");
 
-  if (!file.read(section.get(), section_header.sh_size)) {
-    perror("Couldn't read section");
-    return {};
-  }
+  if (!file.read(section.get(), section_header.sh_size))
+    throw std::runtime_error("Could not read elf section");
+
   return section;
 }
 
@@ -87,17 +81,13 @@ elf_rel_table read_rel_table(const Elf32_Shdr &section_header,
 std::vector<Elf32_Phdr> read_program_headers(const Elf32_Ehdr &header,
                                              std::fstream &elf_file) {
   std::vector<Elf32_Phdr> program_headers(header.e_phnum);
-  if (!elf_file.seekg(header.e_phoff)) {
-    perror("Couldn't read sections");
-    return {};
-  }
-
+  if (!elf_file.seekg(header.e_phoff))
+    throw std::runtime_error("Couldn't read sections");
+  
   for (int i = 0; i < header.e_phnum; i++) {
     if (!elf_file.read(reinterpret_cast<char *>(&program_headers[i]),
-                       header.e_phentsize)) {
-      perror("Couldn't read section header");
-      return {};
-    }
+                       header.e_phentsize))
+      throw std::runtime_error("Couldn't read elf section header");
   }
 
   return program_headers;

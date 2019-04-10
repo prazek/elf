@@ -2,7 +2,7 @@ TESTS_COMMON := memsz multiargs multicall stacksize
 TESTS_GENERIC := exit missing-sym long-ptr mprotect mprotect2 cleanup
 TESTS := $(TESTS_COMMON) $(TESTS_GENERIC)
 CROSSLD := libcrossld.so
-CFLAGS := -O3
+CFLAGS := -O3 -g
 CC := gcc
 
 .PHONY: all
