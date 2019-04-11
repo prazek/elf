@@ -4,83 +4,57 @@ __code64:
 ; save 32 bit registers
 mov r14d, edi
 mov r15d, esi
-; save return pointer
-mov r13d, [rsp]
-add rsp, 4
-; TODO save edi and esi register
-
-; Fix registers:
-; If paramteers are 64 bit, just pop them
-mov rdi, [rsp]
-add rsp, 8
-mov rsi, [rsp]
-add rsp, 8
-mov rdx, [rsp]
-add rsp, 8
-mov rcx, [rsp]
-add rsp, 8
-mov r9, [rsp]
-add rsp, 8
-mov r8, [rsp]
-add rsp, 8
-
-
-
-; For pointer (which is 32 bit) or unsigned long or 32 bit value
-mov edi, [rsp]
-add rsp, 4
-mov esi, [rsp]
-add rsp, 4
-mov edx, [rsp]
-add rsp, 4
-mov ecx, [rsp]
-add rsp, 4
-mov r9d, [rsp]
-add rsp, 4
-mov r8d, [rsp]
-add rsp, 4
-
-; or 32 bit signed long passed
-movsx rdi, DWORD [rsp]
-add rsp, 4
-movsx rsi, DWORD  [rsp]
-add rsp, 4
-movsx rdx, DWORD [rsp]
-add rsp, 4
-movsx rcx, DWORD [rsp]
-add rsp, 4
-movsx r9, DWORD [rsp]
-add rsp, 4
-movsx r8, DWORD [rsp]
-add rsp, 4
-
-
-; then fix the stack back
-sub rsp, 4
-sub rsp, 8
-sub rsp, 12
-sub rsp, 16
-sub rsp, 20
-sub rsp, 24
-
-; Put rest of the arguments:
-add rsp, 24
-mov rax, [rsp]
-
-
 
 ; Fix alignment
 mov r12, rsp
 and rsp, -16
+nop
+
+; TODO save edi and esi register
+
+; Fix registers:
+; If paramteers are 64 bit, just pop them
+mov rdi, [r12 + 4]
+mov rsi, [r12 + 12]
+mov rdx, [r12 + 20]
+mov rcx, [r12 + 28]
+mov r8, [r12 + 36]
+mov r9, [r12 + 44]
+nop
+
+; For pointer (which is 32 bit) or unsigned long or 32 bit value
+mov edi, [r12 + 4]
+mov esi, [r12 + 8]
+mov edx, [r12 + 12]
+mov ecx, [r12 + 16]
+mov r8d, [r12 + 20]
+mov r9d, [r12 + 24]
+nop
+
+; or 32 bit signed long passed
+movsx rdi, DWORD [r12 + 4]
+movsx rsi, DWORD  [r12 + 8]
+movsx rdx, DWORD [r12 + 12]
+movsx rcx, DWORD [r12 + 16]
+movsx r8, DWORD [r12 + 20]
+movsx r9, DWORD [r12 + 24]
+
+
+nop
+; Put rest of the arguments:
+mov rax, [r12 + 24]
+movsx rax, DWORD [r12 + 24] ; for signed 32 bit types
+mov eax, [r12 + 24]
+push rax
+
+
 
 mov rax, print
 call rax
-; Fix back alignment
+; Fix back rsp
 mov rsp, r12
 
 ; restore return pointer
-sub rsp, 4
-mov [rsp], r13d
 
 ; Fix edi and esi
 mov edi, r14d

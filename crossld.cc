@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cstddef>
 #include <fstream>
 #include <iostream>
 #include <memory>
@@ -63,9 +64,9 @@ mapped_mem load_program_segment(const Elf32_Phdr &program_header,
       ((program_header.p_flags & PF_R) ? PROT_READ : 0);
   int flags_before_writing = flags | PROT_WRITE;
 
-  char *mapped_to = (char *) (ptrdiff_t) program_header.p_vaddr;
+  char *mapped_to = (char *) (std::ptrdiff_t) program_header.p_vaddr;
   char *mapped_to_nearest_page =
-      (char *) ((ptrdiff_t) mapped_to & ~(getpagesize() - 1));
+      (char *) ((std::ptrdiff_t) mapped_to & ~(getpagesize() - 1));
   uint32_t diff = mapped_to - mapped_to_nearest_page;
   uint32_t actual_size = program_header.p_memsz + diff;
 
@@ -96,127 +97,154 @@ mapped_mem load_program_segment(const Elf32_Phdr &program_header,
   return exec;
 }
 
-constexpr int NUM_REGISTERS = 6;
-unsigned char CONV_64_TO_64_OPCODES[NUM_REGISTERS][4] = {
-    {0x48, 0x8b, 0x3c, 0x24}, // mov    (%rsp),%rdi
-    {0x48, 0x8b, 0x34, 0x24}, // mov    (%rsp),%rsi
-    {0x48, 0x8b, 0x14, 0x24}, // mov    (%rsp),%rdx
-    {0x48, 0x8b, 0x0c, 0x24}, // mov    (%rsp),%rcx
-    {0x4c, 0x8b, 0x0c, 0x24}, // mov    (%rsp),%r9
-    {0x4c, 0x8b, 0x04, 0x24}  // mov    (%rsp),%r8
+/* My appologies for using terible AT&T asm syntax,
+ * I was just copying it from objdump
+ */
+constexpr unsigned char X = 0;
+constexpr int NUM_PASSING_REGISTERS = 6;
+constexpr int MOVE_64_TO_REGISTER_OFFSET_BYTE = 4;
+constexpr unsigned char MOVE_64_TO_REGISTER[NUM_PASSING_REGISTERS + 1][5] = {
+  {0x49, 0x8b, 0x7c, 0x24, X}, //	movq	X(%r12), %rdi
+  {0x49, 0x8b, 0x74, 0x24, X}, //	movq	X(%r12), %rsi
+  {0x49, 0x8b, 0x54, 0x24, X}, //	movq	X(%r12), %rdx
+  {0x49, 0x8b, 0x4c, 0x24, X}, //	movq	X(%r12), %rcx
+  {0x4d, 0x8b, 0x44, 0x24, X}, //	movq	X(%r12), %r8
+  {0x4d, 0x8b, 0x4c, 0x24, X}, // 	movq	X(%r12), %r9
+  {0x49, 0x8b, 0x44, 0x24, X}  //	movq	X(%r12), %rax
 };
 
-unsigned char SHRINK_STACK_UP_TO_256_BYTES[]{
-    0x48, 0x83, 0xc4, 00 // add    VALUE, %rsp
-};
-
-unsigned char GROW_STACK_UP_TO_256_BYTES[]{
-    0x48, 0x83, 0xec, 00 // sub    VALUE, %rsp
-};
-
-unsigned char CONV_32_BIT_OPCODES_SHORT[4][3] = {
-    {0x8b, 0x3c, 0x24}, //  mov    (%rsp),%edi
-    {0x8b, 0x34, 0x24}, //  mov    (%rsp),%esi
-    {0x8b, 0x14, 0x24}, //  mov    (%rsp),%edx
-    {0x8b, 0x0c, 0x24}  //  mov    (%rsp),%ecx
-};
-
-unsigned char CONV_32_BIT_OPCODES_LONGER[2][4] = {
-    {0x44, 0x8b, 0x0c, 0x24}, //  mov    (%rsp),%r9d
-    {0x44, 0x8b, 0x04, 0x24}  //  mov    (%rsp),%r8d
-};
-
-unsigned char CONV_SIGNED_32_BIT_TO_SIGNED_64[NUM_REGISTERS][4] = {
-    {0x48, 0x63, 0x3c, 0x24}, //  movslq (%rsp),%rdi
-    {0x48, 0x63, 0x34, 0x24}, //  movslq (%rsp),%rsi
-    {0x48, 0x63, 0x14, 0x24}, //  movslq (%rsp),%rdx
-    {0x48, 0x63, 0x0c, 0x24}, //  movslq (%rsp),%rcx
-    {0x4c, 0x63, 0x0c, 0x24}, //  movslq (%rsp),%r9
-    {0x4c, 0x63, 0x04, 0x24}  //  movslq (%rsp),%r8
-};
-int grow_stack(int bytes_num, char *code) {
-  assert(bytes_num < 256);
-  memcpy(code, GROW_STACK_UP_TO_256_BYTES, sizeof(GROW_STACK_UP_TO_256_BYTES));
-  unsigned char bytes_num_c = (char) bytes_num;
-  code[3] = bytes_num_c;
-  return sizeof(GROW_STACK_UP_TO_256_BYTES);
-}
-int shrink_stack(int bytes_num, char *code) {
-  assert(bytes_num < 256);
-  memcpy(code, SHRINK_STACK_UP_TO_256_BYTES,
-         sizeof(SHRINK_STACK_UP_TO_256_BYTES));
-  unsigned char bytes_num_c = (char) bytes_num;
-  code[3] = bytes_num_c;
-  return sizeof(SHRINK_STACK_UP_TO_256_BYTES);
+int set_register_64(unsigned arg_num, int stack_offset, char *code) {
+  if (arg_num < NUM_PASSING_REGISTERS) {
+    assert(sizeof(MOVE_64_TO_REGISTER[0]) == 5);
+    memcpy(code, MOVE_64_TO_REGISTER[arg_num], sizeof(MOVE_64_TO_REGISTER[0]));
+  } else { // Put into rax
+    memcpy(code, MOVE_64_TO_REGISTER[NUM_PASSING_REGISTERS], sizeof(MOVE_64_TO_REGISTER[0]));
+  }
+  assert(stack_offset < 127);
+  auto offset = static_cast<char>(stack_offset);
+  memcpy(code + MOVE_64_TO_REGISTER_OFFSET_BYTE, &offset, 1);
+  return sizeof(MOVE_64_TO_REGISTER[0]);
 }
 
-int set_register(unsigned arg_num, type arg_type, int &stack_shrank,
+constexpr int MOVE_32_TO_REGISTER_OFFSET_BYTE = 4;
+constexpr unsigned char MOVE_32_TO_REGISTER[NUM_PASSING_REGISTERS + 1][5] = {
+  {0x41, 0x8b, 0x7c, 0x24, X}, // 	movl	X(%r12), %edi
+  {0x41, 0x8b, 0x74, 0x24, X}, // 	movl	X(%r12), %esi
+  {0x41, 0x8b, 0x54, 0x24, X}, // 	movl	X(%r12), %edx
+  {0x41, 0x8b, 0x4c, 0x24, X}, // 	movl	X(%r12), %ecx
+  {0x45, 0x8b, 0x44, 0x24, X}, // 	movl	X(%r12), %r8d
+  {0x45, 0x8b, 0x4c, 0x24, X}, // 	movl	X(%r12), %r9d
+  {0x41, 0x8b, 0x44, 0x24, X}, // 	movl	X(%r12), %eax
+};
+
+int set_register_32(unsigned arg_num, int stack_offset, char *code) {
+  if (arg_num < NUM_PASSING_REGISTERS) {
+    assert(sizeof(MOVE_32_TO_REGISTER[0]) == 5);
+    memcpy(code, MOVE_32_TO_REGISTER[arg_num], sizeof(MOVE_32_TO_REGISTER[0]));
+  } else { // Put into rax
+    memcpy(code, MOVE_32_TO_REGISTER[NUM_PASSING_REGISTERS], sizeof(MOVE_32_TO_REGISTER[0]));
+  }
+  assert(stack_offset < 127);
+  auto offset = static_cast<char>(stack_offset);
+  memcpy(code + MOVE_32_TO_REGISTER_OFFSET_BYTE, &offset, 1);
+  return sizeof(MOVE_32_TO_REGISTER[0]);
+}
+
+constexpr int MOVE_32_SIGNED_TO_REGISTER_OFFSET_BYTE = 4;
+constexpr unsigned char MOVE_32_SIGNED_TO_REGISTER[NUM_PASSING_REGISTERS + 1][5] = {
+  {0x49, 0x63, 0x7c, 0x24, X}, //	movslq	X(%r12), %rdi
+  {0x49, 0x63, 0x74, 0x24, X}, //	movslq	X(%r12), %rsi
+  {0x49, 0x63, 0x54, 0x24, X}, //	movslq	X(%r12), %rdx
+  {0x49, 0x63, 0x4c, 0x24, X}, //	movslq	X(%r12), %rcx
+  {0x4d, 0x63, 0x44, 0x24, X}, //	movslq	X(%r12), %r8
+  {0x4d, 0x63, 0x4c, 0x24, X}, //	movslq	X(%r12), %r9
+  {0x49, 0x63, 0x44, 0x24, X}  //	movslq	X(%r12), %rax
+};
+
+int set_register_signed_extend_32(unsigned arg_num, int stack_offset, char *code) {
+  if (arg_num < NUM_PASSING_REGISTERS) {
+    assert(sizeof(MOVE_32_SIGNED_TO_REGISTER[0]) == 5);
+    memcpy(code, MOVE_32_SIGNED_TO_REGISTER[arg_num], sizeof(MOVE_32_SIGNED_TO_REGISTER[0]));
+  } else { // Put into rax
+    memcpy(code, MOVE_32_SIGNED_TO_REGISTER[NUM_PASSING_REGISTERS], sizeof(MOVE_32_SIGNED_TO_REGISTER[0]));
+  }
+  assert(stack_offset < 127);
+  auto offset = static_cast<char>(stack_offset);
+  memcpy(code + MOVE_32_SIGNED_TO_REGISTER_OFFSET_BYTE, &offset, 1);
+  return sizeof(MOVE_32_TO_REGISTER[0]);
+}
+
+int set_register(unsigned arg_num, type arg_type, int stack_offset,
                  char *code) {
-  assert (arg_num < NUM_REGISTERS);
-
   switch (arg_type) {
   case type::TYPE_LONG_LONG:
   case type::TYPE_UNSIGNED_LONG_LONG:
-
-    memcpy(code, CONV_64_TO_64_OPCODES[arg_num], 4);
-    stack_shrank += 8;
-    return 4 + shrink_stack(8, code + 4);
-
+    return set_register_64(arg_num, stack_offset, code);
   case type::TYPE_PTR:
   case type::TYPE_UNSIGNED_LONG:
-  case type::TYPE_INT:
   case type::TYPE_UNSIGNED_INT:
-    if (arg_num < 4) {
-      memcpy(code, CONV_32_BIT_OPCODES_SHORT[arg_num], 3);
-      stack_shrank += 4;
-      return 3 + shrink_stack(4, code + 3);
-    }
-    memcpy(code, CONV_32_BIT_OPCODES_LONGER[arg_num - 4], 4);
-    stack_shrank += 4;
-    return 4 + shrink_stack(4, code + 4);
-
+    return set_register_32(arg_num, stack_offset, code);
   case type::TYPE_LONG:
-    memcpy(code, CONV_SIGNED_32_BIT_TO_SIGNED_64[arg_num], 4);
-    stack_shrank += 4;
-    return 4 + shrink_stack(4, code + 4);
-
+  case type::TYPE_INT:
+    return set_register_signed_extend_32(arg_num, stack_offset, code);
   case type::TYPE_VOID:
     throw std::runtime_error("Arg can't be void");
   }
+  assert(false && "unreachable");
 }
 
-int put_arg_on_stack(type arg_type, char *code) {
+int size_of_type_32(type arg_type) {
   switch (arg_type) {
-  case type::TYPE_LONG:
-  case type::TYPE_UNSIGNED_LONG:
-  case type::TYPE_LONG_LONG:
-  case type::TYPE_UNSIGNED_LONG_LONG:
-  case type::TYPE_PTR:
-    printf("64 bits");
-    return 0;
-
-  case type::TYPE_INT:
-  case type::TYPE_UNSIGNED_INT:
-    printf("32 bits");
-    return 0;
-  case type::TYPE_VOID:
-    throw std::runtime_error("Arg can't be void");
+    case type::TYPE_LONG_LONG:
+    case type::TYPE_UNSIGNED_LONG_LONG:
+      return 8;
+    case type::TYPE_INT:
+    case type::TYPE_UNSIGNED_INT:
+    case type::TYPE_LONG:
+    case type::TYPE_UNSIGNED_LONG:
+    case type::TYPE_PTR:
+      return 4;
+    case type::TYPE_VOID:
+      throw std::runtime_error("Arg can't be void");
   }
+  assert(false && "Unreachable");
 }
+
+
+const unsigned char MOV_64_RAX_TO_STACK[] = {
+  0x50  // pushq	%rax
+};
+
+int push_arg_to_stack(char *code) {
+    std::memcpy(code, MOV_64_RAX_TO_STACK, sizeof(MOV_64_RAX_TO_STACK));
+    return sizeof(MOV_64_RAX_TO_STACK);
+}
+
+int get_stack_offset_for_last_arg(const function &func) {
+  int stack_offset = 0;
+  for (int arg_num = 0; arg_num < func.nargs - 1; arg_num++) {
+    stack_offset += size_of_type_32(func.args[arg_num]);
+  }
+  return stack_offset;
+}
+
+
 void set_registers(const function &func, char *&code) {
-  int stack_shrank = 0;
+  static const int RETURN_PTR_SIZE = 4;
+  int stack_offset = RETURN_PTR_SIZE;
   // Firstly put arguments to registers
-  for (int arg_num = 0; arg_num < std::min(func.nargs, NUM_REGISTERS); arg_num++) {
-    int diff = set_register(arg_num, func.args[arg_num], stack_shrank, code);
-    code += diff;
+  for (int arg_num = 0; arg_num < std::min(func.nargs, NUM_PASSING_REGISTERS); arg_num++) {
+    code += set_register(arg_num, func.args[arg_num], stack_offset, code);
+    stack_offset += size_of_type_32(func.args[arg_num]);
   }
-  code += grow_stack(stack_shrank, code);
 
+  stack_offset = RETURN_PTR_SIZE + get_stack_offset_for_last_arg(func);
   // Rest of the arguments need to be put on the stack.
-  for (int arg_num = NUM_REGISTERS; arg_num < func.nargs; arg_num++) {
-      code += put_arg_on_stack(func.args[arg_num], code);
+  for (int arg_num = func.nargs - 1; arg_num >= NUM_PASSING_REGISTERS; arg_num--) {
+      code += set_register(arg_num, func.args[arg_num], stack_offset, code);
+      stack_offset -= size_of_type_32(func.args[arg_num - 1]);
+      code += push_arg_to_stack(code);
   }
-  // TODO clean up stack after call.
 }
 
 static int exit_code = 0;
@@ -243,16 +271,10 @@ const unsigned char SAVE_EDI_AND_ESI[] = {
 
 };
 
-const unsigned char SAVE_RETURN_PTR[] = {
-    0x44, 0x8b, 0x2c, 0x24, //  mov    (%rsp),%r13d
-    0x48, 0x83, 0xc4, 0x04  //  add    $0x4,%rsp
-};
-
 // Before call, we need to fix aslignment of stack.
 const unsigned char FIX_ALIGNMENT_OF_STACK[] = {
-    0x49, 0x89, 0xe4,      // mov    %rsp,%r12
-    0x48, 0x83, 0xe4, 0xf0 // and    $0xfffffffffffffff0,%rsp
-
+    0x49, 0x89, 0xe4,       // mov    %rsp,%r12
+    0x48, 0x83, 0xe4, 0xf0, // and    $0xfffffffffffffff0,%rsp
 };
 
 const unsigned int FN_64_ADDR_OFFSET = 2;
@@ -293,16 +315,12 @@ const unsigned char RESTORE_EDI_AND_ESI[] = {
     0x44, 0x89, 0xfe  // mov    %r15d,%esi
 };
 
-const unsigned char FIX_RETURN_PTR[] = {
-    0x48, 0x83, 0xec, 0x04, //  sub    $0x4,%rsp
-    0x44, 0x89, 0x2c, 0x24  //  mov    %r13d,(%rsp)
-};
 
 const int RETURN_TO_32_BITS_ADDR_INDX = 15;
 const unsigned char RETURN_TO_32_BITS[] = {
     0x48, 0x83, 0xec, 0x08,                         // sub    $0x8,%rsp
     0xc7, 0x44, 0x24, 0x04, 0x23, 0x00, 0x00, 0x00, // movl   $0x23,0x4(%rsp)
-    0xc7, 0x04, 0x24, 00, 00, 00, 00,         // movl   <PUT_ADDR_HERE>,(%rsp)
+    0xc7, 0x04, 0x24, 00, 00, 00, 00,               // movl   <PUT_ADDR_HERE>,(%rsp)
     0xcb                                            // lret
 };
 
@@ -321,30 +339,30 @@ void set_returned_value(type return_type, char *&code) {
   // If returned value is 64 bit signed long, we need to check if it fits
   // 32 bit long.
   if (return_type == TYPE_LONG) {
-    memcpy(code, CHECK_RETURNED_SIGNED_LONG,
+    std::memcpy(code, CHECK_RETURNED_SIGNED_LONG,
            sizeof(CHECK_RETURNED_SIGNED_LONG));
     code += sizeof(CHECK_RETURNED_SIGNED_LONG);
-    memcpy(code, CALL_FN, sizeof(CALL_FN));
+    std::memcpy(code, CALL_FN, sizeof(CALL_FN));
     void *exit_addr = (void *) exit_64bit;
-    memcpy(code + FN_64_ADDR_OFFSET, &exit_addr, 8);
+    std::memcpy(code + FN_64_ADDR_OFFSET, &exit_addr, 8);
     code += sizeof(CALL_FN);
     return;
   }
   // Similarly, if value is 64 bit ptr or 64 bit unsigned long we need to check
   // if it fits 32 bits.
   if (return_type == TYPE_UNSIGNED_LONG || return_type == TYPE_PTR) {
-    memcpy(code, CHECK_RETURNED_UNSIGNED_LONG_OR_PTR,
+    std::memcpy(code, CHECK_RETURNED_UNSIGNED_LONG_OR_PTR,
            sizeof(CHECK_RETURNED_UNSIGNED_LONG_OR_PTR));
     code += sizeof(CHECK_RETURNED_UNSIGNED_LONG_OR_PTR);
-    memcpy(code, CALL_FN, sizeof(CALL_FN));
+    std::memcpy(code, CALL_FN, sizeof(CALL_FN));
     void *exit_addr = (void *) exit_64bit;
-    memcpy(code + FN_64_ADDR_OFFSET, &exit_addr, 8);
+    std::memcpy(code + FN_64_ADDR_OFFSET, &exit_addr, 8);
     code += sizeof(CALL_FN);
     return;
   }
   // move 64 bit return value from rax to edx:eax
   if (return_type == TYPE_UNSIGNED_LONG_LONG || return_type == TYPE_LONG_LONG) {
-    memcpy(code, MOVE_UPPER_BITS_TO_EDX, sizeof(MOVE_UPPER_BITS_TO_EDX));
+    std::memcpy(code, MOVE_UPPER_BITS_TO_EDX, sizeof(MOVE_UPPER_BITS_TO_EDX));
     code += sizeof(MOVE_UPPER_BITS_TO_EDX);
     return;
   }
@@ -354,50 +372,43 @@ void *create_trampoline(const function &func, char *&code, char *code_end) {
   char *begin_of_function = code;
   assert(code_end - code > 100); // TODO
 
-  memcpy(code, TRAMPOLINE_SWITCH_TO_64_BITS,
+  std::memcpy(code, TRAMPOLINE_SWITCH_TO_64_BITS,
          sizeof(TRAMPOLINE_SWITCH_TO_64_BITS));
   char *addr_aftertrampoline = code + sizeof(TRAMPOLINE_SWITCH_TO_64_BITS);
-  memcpy(code + 3, &addr_aftertrampoline, 4);
+  std::memcpy(code + 3, &addr_aftertrampoline, 4);
   code += sizeof(TRAMPOLINE_SWITCH_TO_64_BITS);
 
-  memcpy(code, SAVE_EDI_AND_ESI, sizeof(SAVE_EDI_AND_ESI));
+  std::memcpy(code, SAVE_EDI_AND_ESI, sizeof(SAVE_EDI_AND_ESI));
   code += sizeof(SAVE_EDI_AND_ESI);
 
-  memcpy(code, SAVE_RETURN_PTR, sizeof(SAVE_RETURN_PTR));
-  code += sizeof(SAVE_RETURN_PTR);
+  std::memcpy(code, FIX_ALIGNMENT_OF_STACK, sizeof(FIX_ALIGNMENT_OF_STACK));
+  code += sizeof(FIX_ALIGNMENT_OF_STACK);
 
   set_registers(func, code);
 
-  memcpy(code, FIX_ALIGNMENT_OF_STACK, sizeof(FIX_ALIGNMENT_OF_STACK));
-  code += sizeof(FIX_ALIGNMENT_OF_STACK);
-
-  memcpy(code, CALL_FN, sizeof(CALL_FN));
-
+  std::memcpy(code, CALL_FN, sizeof(CALL_FN));
   // Put address of real function
-  memcpy(code + 2, &func.code, 8);
+  std::memcpy(code + 2, &func.code, 8);
   code += sizeof(CALL_FN);
+
+  std::memcpy(code, REMOVE_ALIGNMENT_OF_STACK, sizeof(REMOVE_ALIGNMENT_OF_STACK));
+  code += sizeof(REMOVE_ALIGNMENT_OF_STACK);
 
   set_returned_value(func.result, code);
 
-  memcpy(code, REMOVE_ALIGNMENT_OF_STACK, sizeof(REMOVE_ALIGNMENT_OF_STACK));
-  code += sizeof(REMOVE_ALIGNMENT_OF_STACK);
-
-  memcpy(code, RESTORE_EDI_AND_ESI, sizeof(RESTORE_EDI_AND_ESI));
+  std::memcpy(code, RESTORE_EDI_AND_ESI, sizeof(RESTORE_EDI_AND_ESI));
   code += sizeof(RESTORE_EDI_AND_ESI);
 
-  memcpy(code, FIX_RETURN_PTR, sizeof(FIX_RETURN_PTR));
-  code += sizeof(FIX_RETURN_PTR);
-
-  memcpy(code, RETURN_TO_32_BITS, sizeof(RETURN_TO_32_BITS));
+  std::memcpy(code, RETURN_TO_32_BITS, sizeof(RETURN_TO_32_BITS));
   char *addr_after_returning_to_32_bit = code + sizeof(RETURN_TO_32_BITS);
-  memcpy(code + RETURN_TO_32_BITS_ADDR_INDX, &addr_after_returning_to_32_bit,
+  std::memcpy(code + RETURN_TO_32_BITS_ADDR_INDX, &addr_after_returning_to_32_bit,
          4);
   code += sizeof(RETURN_TO_32_BITS);
 
-  memcpy(code, SET_32_BITS_SEGMENTS, sizeof(SET_32_BITS_SEGMENTS));
+  std::memcpy(code, SET_32_BITS_SEGMENTS, sizeof(SET_32_BITS_SEGMENTS));
   code += sizeof(SET_32_BITS_SEGMENTS);
 
-  memcpy(code, RETURN_FROM_TRAMPOLINE, sizeof(RETURN_FROM_TRAMPOLINE));
+  std::memcpy(code, RETURN_FROM_TRAMPOLINE, sizeof(RETURN_FROM_TRAMPOLINE));
   code += sizeof(RETURN_FROM_TRAMPOLINE);
 
   return begin_of_function;
@@ -471,7 +482,7 @@ void set_rellocations(
     if (trampoline_code == trampolines.end())
       throw std::runtime_error(std::string("Function [") + rel_name + "] not provided");
 
-    char *address_to_substitute = (char *) (ptrdiff_t) relocation.r_offset;
+    char *address_to_substitute = (char *) (std::ptrdiff_t) relocation.r_offset;
     memcpy(address_to_substitute, &trampoline_code->second, 4);
   }
 }
@@ -519,7 +530,7 @@ extern "C" int crossld_start(const char *fname, const function *funcs,
     throw std::system_error(errno, std::system_category(), "Can't allocate stack");
 
   const void *reversed_stack = (void *) (((uint64_t) stack) + STACK_SIZE - 4);
-  char *entry_point = (char *) (ptrdiff_t) header.e_entry;
+  char *entry_point = (char *) (std::ptrdiff_t) header.e_entry;
 
   if (setjmp(exit_buff) == 0) {
     /* Switch to 32-bit mode and jump into the 32-bit code */
@@ -538,9 +549,9 @@ extern "C" int crossld_start(const char *fname, const function *funcs,
 
   return exit_code;
 } catch (std::system_error &err) {
-  fprintf(stderr, "crossld_start: %s : %s\n", err.what(), std::strerror(err.code().value()));
+  fprintf(stderr, "Error crossld_start: %s : %s\n", err.what(), std::strerror(err.code().value()));
   return -1;
 } catch (std::exception &ex) {
-  fprintf(stderr, "crossld_start: %s\n", ex.what());
+  fprintf(stderr, "Error crossld_start: %s\n", ex.what());
   return -1;
 }

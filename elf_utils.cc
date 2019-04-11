@@ -57,7 +57,7 @@ read_symbol_table(const Elf32_Shdr &section_header,
   std::vector<std::string> symbol_table_strings;
   symbol_table_strings.reserve(symbol_count);
 
-  for (int i = 0; i < symbol_count; i++) {
+  for (size_t i = 0; i < symbol_count; i++) {
     symbol_table_strings.push_back(&string_table[symbol_table[i].st_name]);
   }
 

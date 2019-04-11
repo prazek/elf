@@ -1,8 +1,17 @@
-cmake_minimum_required(VERSION 3.9)
+cmake_minimum_required(VERSION 3.7)
 project(elf)
 
-set(CMAKE_CXX_STANDARD 11)
+if (NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE "Debug" CACHE STRING
+            "Choose the type of build, options are: Debug Release
+            RelWithDebInfo MinSizeRel."
+            FORCE)
 
+    message(STATUS "No build type selected, default to Debug")
+    set(CMAKE_BUILD_TYPE "Debug")
+endif()
+
+set(CMAKE_CXX_STANDARD 11)
 
 set(CMAKE_CXX_FLAGS_DEBUG "-g -O0 -fno-omit-frame-pointer ")
 set(CMAKE_CXX_FLAGS_RELEASE "-O2 -fomit-frame-pointer -ffast-math-optimizations ")
@@ -18,5 +27,5 @@ add_library(crossld SHARED
 set_target_properties(crossld PROPERTIES PUBLIC_HEADER crossld.h)
 target_include_directories(crossld PRIVATE .)
 
-add_executable(test test.cc ${SOURCE_FILES})
+#add_executable(test test.cc ${SOURCE_FILES})
 #target_link_libraries(test crossld)
