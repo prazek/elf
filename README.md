@@ -1,6 +1,7 @@
 # Crossld
 This is a one of the tasks of the Advanced Operating Systems course (Zawansowane Systemy Operacyjne) on MIMUW 
-(University of Warsaw).
+(University of Warsaw). 
+The description of full task can be found here: http://students.mimuw.edu.pl/ZSO/PUBLIC-SO/2018-2019/z1_elf/index.html
 
 crossld_start is a function that while executing x86_64 code, start Elf32 executable [fname] with provided functions.
 For each function it creates a trampoline that:
