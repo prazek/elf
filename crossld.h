@@ -16,13 +16,12 @@ enum type {
 };
 
 struct function {
-  const char *name;
-  const enum type *args;
+  const char* name;
+  const enum type* args;
   int nargs;
   enum type result;
-  void *code;
+  void* code;
 };
-
 
 /*
  * While executing x86_64 code, start Elf32 executable [fname] with provided
@@ -41,7 +40,7 @@ struct function {
  *
  * In the end, it returns the code for the execution.
  */
-int crossld_start(const char *fname, const struct function *funcs, int nfuncs);
+int crossld_start(const char* fname, const struct function* funcs, int nfuncs);
 
 #ifdef __cplusplus
 }

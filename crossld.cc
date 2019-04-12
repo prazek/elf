@@ -9,22 +9,22 @@
 
 #include <cassert>
 #include <csetjmp>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <cstddef>
 #include <fstream>
 #include <iostream>
 #include <memory>
 #include <string>
-#include <vector>
 #include <system_error>
+#include <vector>
 
 using namespace elf_utils;
 
 namespace {
 
-bool check_elf(const Elf32_Ehdr &header) {
+bool check_elf(const Elf32_Ehdr& header) {
   if (std::memcmp(header.e_ident, ELFMAG, SELFMAG) != 0)
     return false;
   if (header.e_type != ET_EXEC)
@@ -34,9 +34,9 @@ bool check_elf(const Elf32_Ehdr &header) {
   return true;
 }
 
-bool get_header(std::fstream &file, Elf32_Ehdr &header) {
+bool get_header(std::fstream& file, Elf32_Ehdr& header) {
   // read the header
-  if (!file.read(reinterpret_cast<char *>(&header), sizeof(header))) {
+  if (!file.read(reinterpret_cast<char*>(&header), sizeof(header))) {
     fprintf(stderr, "crossld_start: Not long enough elf file");
     return false;
   }
@@ -48,25 +48,19 @@ bool get_header(std::fstream &file, Elf32_Ehdr &header) {
   return true;
 }
 
-
-mmap_utils::mapped_mem load_program_segment(const Elf32_Phdr &program_header,
-                                std::fstream &elf_file) {
-
-  int flags = ((program_header.p_flags & PF_W) ? PROT_WRITE : 0) |
-      ((program_header.p_flags & PF_X) ? PROT_EXEC : 0) |
-      ((program_header.p_flags & PF_R) ? PROT_READ : 0);
+mmap_utils::mapped_mem load_program_segment(const Elf32_Phdr& program_header, std::fstream& elf_file) {
+  int flags = ((program_header.p_flags & PF_W) ? PROT_WRITE : 0) | ((program_header.p_flags & PF_X) ? PROT_EXEC : 0) |
+              ((program_header.p_flags & PF_R) ? PROT_READ : 0);
   int flags_before_writing = flags | PROT_WRITE;
 
-  char *mapped_to = (char *) (std::ptrdiff_t) program_header.p_vaddr;
-  char *mapped_to_nearest_page =
-      (char *) ((std::ptrdiff_t) mapped_to & ~(getpagesize() - 1));
+  char* mapped_to = (char*)(std::ptrdiff_t)program_header.p_vaddr;
+  char* mapped_to_nearest_page = (char*)((std::ptrdiff_t)mapped_to & ~(getpagesize() - 1));
   uint32_t diff = mapped_to - mapped_to_nearest_page;
   uint32_t actual_size = program_header.p_memsz + diff;
 
-  char *mmaped_ptr =
-      (char *) mmap(mapped_to_nearest_page, actual_size, flags_before_writing,
-                    MAP_ANONYMOUS | MAP_PRIVATE, -1,
-                    0); // TODO check MAP_PRIVATE
+  char* mmaped_ptr =
+      (char*)mmap(mapped_to_nearest_page, actual_size, flags_before_writing, MAP_ANONYMOUS | MAP_PRIVATE, -1,
+                  0);  // TODO check MAP_PRIVATE
 
   mmap_utils::mapped_mem exec(mmaped_ptr, mmap_utils::Unmapper{actual_size});
 
@@ -90,15 +84,12 @@ mmap_utils::mapped_mem load_program_segment(const Elf32_Phdr &program_header,
   return exec;
 }
 
-
-std::vector<mmap_utils::mapped_mem> alloc_exec(const Elf32_Ehdr &header,
-                                   std::fstream &elf_file) {
-  const std::vector<Elf32_Phdr> program_headers =
-      read_program_headers(header, elf_file);
+std::vector<mmap_utils::mapped_mem> alloc_exec(const Elf32_Ehdr& header, std::fstream& elf_file) {
+  const std::vector<Elf32_Phdr> program_headers = read_program_headers(header, elf_file);
   std::vector<mmap_utils::mapped_mem> mapped_sections;
   mapped_sections.reserve(program_headers.size());
 
-  for (const Elf32_Phdr &pheader : program_headers) {
+  for (const Elf32_Phdr& pheader : program_headers) {
     // Skip
     if (pheader.p_type != PT_LOAD)
       continue;
@@ -112,27 +103,22 @@ std::vector<mmap_utils::mapped_mem> alloc_exec(const Elf32_Ehdr &header,
   return mapped_sections;
 }
 
-void set_rellocations(
-    const elf_symbol_strings &symbol_table_strings,
-    const elf_rel_table &relocation_table,
-    const std::unordered_map<std::string, void *> &trampolines) {
-
-  for (const Elf32_Rel &relocation : relocation_table) {
-    const std::string &rel_name =
-        symbol_table_strings[ELF32_R_SYM(relocation.r_info)];
+void set_rellocations(const elf_symbol_strings& symbol_table_strings, const elf_rel_table& relocation_table,
+                      const std::unordered_map<std::string, void*>& trampolines) {
+  for (const Elf32_Rel& relocation : relocation_table) {
+    const std::string& rel_name = symbol_table_strings[ELF32_R_SYM(relocation.r_info)];
     auto trampoline_code = trampolines.find(rel_name);
     if (trampoline_code == trampolines.end())
       throw std::runtime_error(std::string("Function [") + rel_name + "] not provided");
 
-    char *address_to_substitute = (char *) (std::ptrdiff_t) relocation.r_offset;
+    char* address_to_substitute = (char*)(std::ptrdiff_t)relocation.r_offset;
     std::memcpy(address_to_substitute, &trampoline_code->second, 4);
   }
 }
 
-} // namespace
+}  // namespace
 
-extern "C" int crossld_start(const char *fname, const function *funcs,
-                             int nfuncs) try {
+extern "C" int crossld_start(const char* fname, const function* funcs, int nfuncs) try {
   std::fstream elf_file(fname, std::ios_base::in | std::ios::binary);
 
   if (!elf_file)
@@ -153,10 +139,10 @@ extern "C" int crossld_start(const char *fname, const function *funcs,
   elf_symbol_strings symbol_table_strings;
   elf_rel_table relocation_table;
 
-  for (const Elf32_Shdr &section_header : section_headers) {
+  for (const Elf32_Shdr& section_header : section_headers) {
     if (section_header.sh_type == SHT_DYNSYM) {
-      std::tie(symbol_table, symbol_table_strings) = read_symbol_table(
-          section_header, section_headers.at(section_header.sh_link), elf_file);
+      std::tie(symbol_table, symbol_table_strings) =
+          read_symbol_table(section_header, section_headers.at(section_header.sh_link), elf_file);
 
     } else if (section_header.sh_type == SHT_REL) {
       relocation_table = read_rel_table(section_header, elf_file);
@@ -165,35 +151,34 @@ extern "C" int crossld_start(const char *fname, const function *funcs,
 
   set_rellocations(symbol_table_strings, relocation_table, trampolines);
 
-  static const int STACK_SIZE = 1024 * 1024 * 4; // 4MB of stack.
-  void *stack = mmap(NULL, STACK_SIZE, PROT_READ | PROT_WRITE,
-                     MAP_ANONYMOUS | MAP_PRIVATE | MAP_32BIT, -1, 0);
+  static const int STACK_SIZE = 1024 * 1024 * 4;  // 4MB of stack.
+  void* stack = mmap(NULL, STACK_SIZE, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE | MAP_32BIT, -1, 0);
   if (stack == MAP_FAILED)
     throw std::system_error(errno, std::system_category(), "Can't allocate stack");
 
-  const void *reversed_stack = (void *) (((uint64_t) stack) + STACK_SIZE - 4);
-  char *entry_point = (char *) (std::ptrdiff_t) header.e_entry;
+  const void* reversed_stack = (void*)(((uint64_t)stack) + STACK_SIZE - 4);
+  char* entry_point = (char*)(std::ptrdiff_t)header.e_entry;
 
   if (setjmp(trampolines::get_exit_jump_buffer()) == 0) {
     /* Switch to 32-bit mode and jump into the 32-bit code */
-    __asm__ volatile("movq %0, %%rsp  \n"
-                     "subq $8, %%rsp \n"
-                     "movl $0x23, 4(%%rsp) \n"
-                     "movl %k1, (%%rsp) \n"
-                     "movw %w2, %%ds \n"
-                     "movw %w2, %%es \n"
-                     "lret"::"irm"(reversed_stack),
-    "r"(entry_point), "r"(0x2b)
-    : "rax", "memory", "flags");
-    assert(false &&
-        "This asm does not return, we get back only through longjmp");
+    __asm__ volatile(
+        "movq %0, %%rsp  \n"
+        "subq $8, %%rsp \n"
+        "movl $0x23, 4(%%rsp) \n"
+        "movl %k1, (%%rsp) \n"
+        "movw %w2, %%ds \n"
+        "movw %w2, %%es \n"
+        "lret" ::"irm"(reversed_stack),
+        "r"(entry_point), "r"(0x2b)
+        : "rax", "memory", "flags");
+    assert(false && "This asm does not return, we get back only through longjmp");
   }
 
   return trampolines::get_exit_code();
-} catch (std::system_error &err) {
+} catch (std::system_error& err) {
   fprintf(stderr, "Error crossld_start: %s : %s\n", err.what(), std::strerror(err.code().value()));
   return -1;
-} catch (std::exception &ex) {
+} catch (std::exception& ex) {
   fprintf(stderr, "Error crossld_start: %s\n", ex.what());
   return -1;
 }
