@@ -195,7 +195,7 @@ const unsigned char CHECK_RETURNED_SIGNED_LONG[] = {
     0x48, 0x39, 0xca,              //  cmp    %rcx,%rdx
     0x76, 0x1a,                    //  jbe    b3 <ok>
     0x83, 0xcf, 0xff,              //  or     $0xffffffff,%edi
-    // Here put call to exit
+                                   // Here put call to exit
 };
 
 const unsigned char CHECK_RETURNED_UNSIGNED_LONG_OR_PTR[] = {
@@ -203,7 +203,7 @@ const unsigned char CHECK_RETURNED_UNSIGNED_LONG_OR_PTR[] = {
     0x48, 0x39, 0xc8,              // cmp    %rcx,%rax
     0x76, 0x08,                    // jbe    b3 <ok>
     0x83, 0xcf, 0xff,              // or     $0xffffffff,%edi
-    // HERE put be a call to exit.
+                                   // HERE put be a call to exit.
 };
 
 const unsigned char MOVE_UPPER_BITS_TO_EDX[] = {

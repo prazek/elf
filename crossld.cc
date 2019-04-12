@@ -59,8 +59,7 @@ mmap_utils::mapped_mem load_program_segment(const Elf32_Phdr& program_header, st
   uint32_t actual_size = program_header.p_memsz + diff;
 
   char* mmaped_ptr =
-      (char*)mmap(mapped_to_nearest_page, actual_size, flags_before_writing, MAP_ANONYMOUS | MAP_PRIVATE, -1,
-                  0);  // TODO check MAP_PRIVATE
+      (char*)mmap(mapped_to_nearest_page, actual_size, flags_before_writing, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
 
   mmap_utils::mapped_mem exec(mmaped_ptr, mmap_utils::Unmapper{actual_size});
 

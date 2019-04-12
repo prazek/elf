@@ -10,7 +10,6 @@ mov r12, rsp
 and rsp, -16
 nop
 
-; TODO save edi and esi register
 
 ; Fix registers:
 ; If paramteers are 64 bit, just pop them
