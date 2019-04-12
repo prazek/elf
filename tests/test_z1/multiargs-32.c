@@ -9,6 +9,8 @@ asm (
 #include "multiargs.h"
 
 void entry() {
+    //pass_args(0, 1, 2, 3, 4, 5, 6);
+    validate(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11);
 	long long int res = validate(I1, L1, LL1, U1, UL1, ULL1, I2, L2, LL2, U2, UL2, ULL2);
 	if (res == LL_RET) {
 		print("OK");

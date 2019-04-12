@@ -7,3 +7,5 @@ long long validate(int i1, long l1, long long ll1, unsigned int ui1,
 		unsigned long ul1, unsigned long long ull1, int i2, long l2,
 		long long ll2, unsigned int ui2, unsigned long ul2,
 		unsigned long long ull2) {}
+
+void pass_args(int a, int b, int c, int d, int e, int f, int g) {}

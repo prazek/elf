@@ -19,13 +19,11 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O2 -fomit-frame-pointer -ffast-math-optimizations 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-strict-aliasing -Wall -Wextra")
 
 
-set(SOURCE_FILES crossld.h crossld.cc elf_utils.h elf_utils.cc)
+set(SOURCE_FILES crossld.h crossld.cc elf_utils.h elf_utils.cc trampolines.h trampolines.cc mmap_utils.h)
 
 
 add_library(crossld SHARED
         ${SOURCE_FILES})
-set_target_properties(crossld PROPERTIES PUBLIC_HEADER crossld.h)
+set_target_properties(crossld PROPERTIES PUBLIC_HEADER crossld.h elf_utils.h trampolines.h)
 target_include_directories(crossld PRIVATE .)
 
-#add_executable(test test.cc ${SOURCE_FILES})
-#target_link_libraries(test crossld)

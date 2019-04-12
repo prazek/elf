@@ -17,6 +17,8 @@ int get_int(void);
 /* Return 64-bit ptr, should cause error */
 void *get_ptr64(void);
 
+void pass_args(int a, int b, int c, int d, int e, int f, int g);
+
 /* validation of argument passing */
 long long validate(int, long, long long, unsigned int, unsigned long,
 		unsigned long long, int, long, long long, unsigned int,
