@@ -163,7 +163,7 @@ __attribute__((noreturn)) void exit_64bit(int code) {
 // instructions.
 const unsigned char TRAMPOLINE_SWITCH_TO_64_BITS[] = {
     0x6a, 0x33,              // 0: push   $0x33
-    0x68, 00,   00, 00, 00,  // 2: push   $0x0
+    0x68, 00, 00, 00, 00,    // 2: push   $0x0
     0xcb                     // 7: lret
 };
 
@@ -173,13 +173,16 @@ const unsigned char TRAMPOLINE_SWITCH_TO_64_BITS[] = {
 const unsigned char SAVE_EDI_AND_ESI[] = {
     0x41, 0x89, 0xfe,  //   mov    %edi,%r14d
     0x41, 0x89, 0xf7   //   mov    %esi,%r15d
-
 };
 
 // Before call, we need to fix aslignment of stack.
 const unsigned char FIX_ALIGNMENT_OF_STACK[] = {
     0x49, 0x89, 0xe4,        // mov    %rsp,%r12
     0x48, 0x83, 0xe4, 0xf0,  // and    $0xfffffffffffffff0,%rsp
+};
+
+const unsigned char ADD_8_BYTES_TO_STACK[] = {
+  0x48, 0x83, 0xec, 0x08  //	subq	$8, %rsp
 };
 
 const unsigned int FN_64_ADDR_OFFSET = 2;
@@ -293,6 +296,12 @@ void* create_trampoline(const function& func, char*& code, char* code_end) {
 
   std::memcpy(code, FIX_ALIGNMENT_OF_STACK, sizeof(FIX_ALIGNMENT_OF_STACK));
   code += sizeof(FIX_ALIGNMENT_OF_STACK);
+
+  // If number of args that need to be passed on stack is odd, add 8 bytes to rsp.
+  if (func.nargs > NUM_PASSING_REGISTERS && (func.nargs - NUM_PASSING_REGISTERS) % 2 == 1) {
+    std::memcpy(code, ADD_8_BYTES_TO_STACK, sizeof(ADD_8_BYTES_TO_STACK));
+    code += sizeof(ADD_8_BYTES_TO_STACK);
+  }
 
   set_registers(func, code);
 

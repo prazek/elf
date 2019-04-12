@@ -8,6 +8,7 @@ mov r15d, esi
 ; Fix alignment
 mov r12, rsp
 and rsp, -16
+sub rsp, 8 ; if odd number of args on the stack
 nop
 
 

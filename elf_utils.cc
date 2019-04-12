@@ -31,9 +31,6 @@ elf_bytes read_section(const Elf32_Shdr& section_header, std::fstream& file) {
   return section;
 }
 
-using elf_symbol_table = std::vector<Elf32_Sym>;
-using elf_symbol_strings = std::vector<std::string>;
-
 std::tuple<elf_symbol_table, elf_symbol_strings> read_symbol_table(const Elf32_Shdr& section_header,
                                                                    const Elf32_Shdr& string_header,
                                                                    std::fstream& file) {
@@ -59,8 +56,6 @@ std::tuple<elf_symbol_table, elf_symbol_strings> read_symbol_table(const Elf32_S
 
   return {std::move(symbol_table), std::move(symbol_table_strings)};
 }
-
-using elf_rel_table = std::vector<Elf32_Rel>;
 
 elf_rel_table read_rel_table(const Elf32_Shdr& section_header, std::fstream& file) {
   const auto symbol_count = section_header.sh_size / sizeof(Elf32_Rel);
